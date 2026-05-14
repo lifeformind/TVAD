@@ -1,5 +1,6 @@
 """KioskPipeline — state machine for the wake-word talkback kiosk."""
 
+import sys
 import time
 from typing import Any, Callable, Optional
 
@@ -45,7 +46,6 @@ class KioskPipeline:
         self._tail_samples = int(
             kiosk_cfg["wake_capture_tail_seconds"] * config["core"]["audio"]["sample_rate"]
         )
-        self._session_primary_threshold = kiosk_cfg["session_primary_threshold"]
         self._silence_timeout_s = kiosk_cfg["session_silence_timeout_s"]
         self._hard_timeout_s = kiosk_cfg["session_hard_timeout_s"]
         self._smoother_cfg = kiosk_cfg["decision_smoother"]
@@ -165,5 +165,4 @@ class KioskPipeline:
             fn(*args)
         except Exception as e:
             # In production, route to logger. Print to stderr for now.
-            import sys
             print(f"[kiosk callback error] {type(e).__name__}: {e}", file=sys.stderr)

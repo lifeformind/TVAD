@@ -222,8 +222,8 @@ class TestSessionEnd:
         clock = [1000.0]
         monkeypatch.setattr("modes.kiosk.pipeline.time.monotonic", lambda: clock[0])
         force_active_session(p, fake_wake)
-        # Embedder always returns snapshot → matched segments keep silence_timer reset
-        # but hard timeout wins
+        # Both timeouts expire simultaneously at this clock value (301s past start);
+        # hard is checked first in _handle_active_chunk and wins.
         clock[0] = 1301.0  # 301 s, past 300 s hard_timeout
         fake_vad.process_chunk.return_value = []
         p._handle_chunk(np.zeros(480, dtype=np.float32))
