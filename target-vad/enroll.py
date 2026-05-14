@@ -1,6 +1,6 @@
 """Enrollment CLI — register speaker voiceprints from microphone."""
 
-import compat  # noqa: F401 — torchaudio/speechbrain shim
+from core import compat  # noqa: F401 — torchaudio/speechbrain shim
 import argparse
 import os
 import sys

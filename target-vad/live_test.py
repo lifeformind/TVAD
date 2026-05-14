@@ -1,6 +1,6 @@
 """Quick live mic test — records for 10s, runs VAD + optional embedding on detected speech."""
 
-import compat  # noqa: F401
+from core import compat  # noqa: F401
 import sys
 import time
 

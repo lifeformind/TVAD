@@ -1,6 +1,6 @@
 """Target VAD — main entry point."""
 
-import compat  # noqa: F401 — torchaudio/speechbrain shim
+from core import compat  # noqa: F401 — torchaudio/speechbrain shim
 import argparse
 
 import yaml
