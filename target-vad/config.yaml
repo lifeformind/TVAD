@@ -32,4 +32,4 @@ kiosk:
   decision_smoother:
     window_size: 3
     min_matches: 2
-    threshold: 0.60
+    threshold: 0.50   # tuned for C10 + classroom DSP; raise once non-self baseline measured
