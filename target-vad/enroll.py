@@ -13,8 +13,8 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from core.audio.mic_stream import MicrophoneStream
-from speaker.embedder import EmbeddingExtractor
-from speaker.enrollment_store import EnrollmentStore
+from core.speaker.embedder import EmbeddingExtractor
+from core.speaker.enrollment_store import EnrollmentStore
 from core.vad.silero_vad import SileroVAD
 
 console = Console()
@@ -164,7 +164,7 @@ def cmd_test(args):
     embedder = EmbeddingExtractor()
     store = EnrollmentStore(config["paths"]["voiceprints_dir"])
 
-    from speaker.verifier import SpeakerVerifier
+    from core.speaker.verifier import SpeakerVerifier
     verifier = SpeakerVerifier(store, config["speaker"]["threshold"])
 
     users = store.list_users()

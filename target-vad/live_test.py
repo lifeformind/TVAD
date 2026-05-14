@@ -48,7 +48,7 @@ def main():
 
     if segments:
         print("\nTesting speaker embeddings on all segments...")
-        from speaker.embedder import EmbeddingExtractor
+        from core.speaker.embedder import EmbeddingExtractor
 
         embedder = EmbeddingExtractor()
         for i, seg in enumerate(segments):

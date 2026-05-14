@@ -6,9 +6,9 @@ from typing import Callable, Optional
 from rich.console import Console
 
 from core.audio.mic_stream import MicrophoneStream
-from speaker.embedder import EmbeddingExtractor
-from speaker.enrollment_store import EnrollmentStore
-from speaker.verifier import SpeakerVerifier, VerificationResult
+from core.speaker.embedder import EmbeddingExtractor
+from core.speaker.enrollment_store import EnrollmentStore
+from core.speaker.verifier import SpeakerVerifier, VerificationResult
 from core.vad.silero_vad import SileroVAD, SpeechSegment
 
 console = Console()

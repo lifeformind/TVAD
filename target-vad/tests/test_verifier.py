@@ -6,8 +6,8 @@ import tempfile
 import numpy as np
 import pytest
 
-from speaker.enrollment_store import EnrollmentStore
-from speaker.verifier import SpeakerVerifier, VerificationResult, cosine_similarity
+from core.speaker.enrollment_store import EnrollmentStore
+from core.speaker.verifier import SpeakerVerifier, VerificationResult, cosine_similarity
 
 
 @pytest.fixture
