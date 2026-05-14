@@ -2,6 +2,7 @@
 
 import sys
 import time
+import traceback
 from typing import Any, Callable, Optional
 
 import numpy as np
@@ -31,6 +32,7 @@ class KioskPipeline:
         on_primary_speech: Callable[[SpeechSegment, np.ndarray], None],
         on_session_started: Callable[[], None] = lambda: None,
         on_session_ended: Callable[[str], None] = lambda reason: None,
+        on_event: Callable[[str, dict], None] = lambda event, payload: None,
         # Underscore kwargs are for test injection. Production code omits them.
         _mic: Optional[Any] = None,
         _vad: Optional[Any] = None,
@@ -41,6 +43,7 @@ class KioskPipeline:
         self.on_primary_speech = on_primary_speech
         self.on_session_started = on_session_started
         self.on_session_ended = on_session_ended
+        self.on_event = on_event
 
         kiosk_cfg = config["kiosk"]
         self._tail_samples = int(
@@ -57,17 +60,35 @@ class KioskPipeline:
             kiosk_cfg["wake_phrase"], kiosk_cfg["wake_threshold"]
         )
 
-        self._state = "IDLE"
         self._session: Optional[Session] = None
         self._capture_buffer = np.array([], dtype=np.float32)
         self._running = False
+
+        # Warm up the ECAPA model so the first wake → session_started transition
+        # doesn't include the model's cold-start latency (~1.3s on CPU).
+        # Skip during tests (when _embedder was injected) — tests don't need warmup.
+        if _embedder is None:
+            try:
+                _ = self.embedder.extract(np.zeros(12800, dtype=np.float32))
+            except Exception:
+                # Warmup failure is non-fatal; the model will lazy-load on first real use.
+                pass
+
+        self._state = "IDLE"
 
     def stop(self) -> None:
         """Signal run() to exit cleanly on the next loop iteration."""
         self._running = False
 
     def run(self) -> None:
-        """Main mic loop. Blocks until stop() is called or KeyboardInterrupt."""
+        """Main mic loop. Blocks until stop() is called or KeyboardInterrupt.
+
+        Note: this loop is driven entirely by mic chunks. Session timeouts
+        (silence and hard) are checked on each chunk arrival in
+        _handle_active_chunk, so they cannot fire if the mic stops producing
+        chunks (e.g., disconnected). In practice the C10 always emits chunks
+        (even silence), so this is a latent risk rather than a current bug.
+        """
         self._running = True
         try:
             with self.mic:
@@ -95,6 +116,8 @@ class KioskPipeline:
     def _handle_idle_chunk(self, chunk: np.ndarray) -> None:
         wake_score = self.wake_detector.process(chunk)
         if wake_score is not None:
+            self._safe_callback(self.on_event, "wake_detected",
+                                {"phrase": self.config["kiosk"]["wake_phrase"], "score": wake_score})
             self._state = "CAPTURING"
             self._capture_buffer = np.array([], dtype=np.float32)
 
@@ -122,10 +145,15 @@ class KioskPipeline:
         )
         self.vad.reset()
         self._state = "ACTIVE_SESSION"
+        self._safe_callback(self.on_event, "session_started",
+                            {"snapshot_norm": float(np.linalg.norm(embedding))})
         self._safe_callback(self.on_session_started)
 
     def _handle_active_chunk(self, chunk: np.ndarray) -> None:
-        # Check timeouts before processing more audio
+        # Check timeouts before processing more audio.
+        # Hard is checked before silence: when both expire on the same chunk
+        # (silence_timeout < hard_timeout), the absolute wall-clock limit wins.
+        # This is a deliberate deviation from the spec's listed order.
         now = time.monotonic()
         assert self._session is not None
         if self._session.session_duration(now) >= self._hard_timeout_s:
@@ -147,6 +175,11 @@ class KioskPipeline:
             return  # skip this segment, session continues
         score = cosine_similarity(embedding, self._session.primary_embedding)
         matched = self._session.smoother.update(score)
+        self._safe_callback(self.on_event, "segment_scored", {
+            "score": float(score),
+            "duration_ms": float(segment.duration_ms),
+            "decision": "match" if matched else "no_match",
+        })
         if matched:
             self._session.last_speech_at = time.monotonic()
             self._safe_callback(self.on_primary_speech, segment, embedding)
@@ -156,6 +189,7 @@ class KioskPipeline:
         self._state = "IDLE"
         self._capture_buffer = np.array([], dtype=np.float32)
         self.wake_detector.reset()
+        self._safe_callback(self.on_event, "session_ended", {"reason": reason})
         self._safe_callback(self.on_session_ended, reason)
 
     def _safe_callback(self, fn: Callable, *args) -> None:
@@ -166,3 +200,4 @@ class KioskPipeline:
         except Exception as e:
             # In production, route to logger. Print to stderr for now.
             print(f"[kiosk callback error] {type(e).__name__}: {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)

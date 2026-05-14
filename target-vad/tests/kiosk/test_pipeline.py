@@ -241,3 +241,97 @@ class TestSessionEnd:
         on_ended.assert_called_with("stopped")
         assert p._state == "IDLE"
         assert p._session is None
+
+
+class TestEventCallback:
+    def test_on_event_default_is_noop(self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake):
+        """Pipeline works fine when no on_event callback is provided."""
+        p = make_pipeline(base_config, fake_mic, fake_vad, fake_embedder, fake_wake)
+        # Drive through a session — should not raise
+        force_active_session(p, fake_wake)
+        assert p._state == "ACTIVE_SESSION"
+
+    def test_wake_detected_event_fires(self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake):
+        """on_event fires with 'wake_detected' when wake fires in IDLE."""
+        events = []
+        def on_event(event_type, payload):
+            events.append((event_type, payload))
+        from modes.kiosk.pipeline import KioskPipeline
+        p = KioskPipeline(
+            config=base_config,
+            on_primary_speech=lambda s, e: None,
+            on_event=on_event,
+            _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
+        )
+        fake_wake.process.return_value = 0.87
+        p._handle_chunk(np.zeros(480, dtype=np.float32))
+        assert len(events) == 1
+        assert events[0][0] == "wake_detected"
+        assert events[0][1] == {"phrase": "hey_jarvis", "score": 0.87}
+
+    def test_session_started_event_fires(self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake):
+        """on_event fires with 'session_started' when session begins."""
+        events = []
+        from modes.kiosk.pipeline import KioskPipeline
+        p = KioskPipeline(
+            config=base_config,
+            on_primary_speech=lambda s, e: None,
+            on_event=lambda et, pl: events.append((et, pl)),
+            _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
+        )
+        force_active_session(p, fake_wake)
+        types = [e[0] for e in events]
+        assert "session_started" in types
+        started_payload = next(p for t, p in events if t == "session_started")
+        assert "snapshot_norm" in started_payload
+        assert started_payload["snapshot_norm"] == pytest.approx(1.0, abs=1e-5)
+
+    def test_segment_scored_event_fires(self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake):
+        """on_event fires with 'segment_scored' for each session segment, with match/no_match decision."""
+        events = []
+        from modes.kiosk.pipeline import KioskPipeline
+        p = KioskPipeline(
+            config=base_config,
+            on_primary_speech=lambda s, e: None,
+            on_event=lambda et, pl: events.append((et, pl)),
+            _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
+        )
+        force_active_session(p, fake_wake)
+        fake_vad.process_chunk.return_value = [make_segment()]
+        p._handle_chunk(np.zeros(480, dtype=np.float32))
+        seg_events = [e for e in events if e[0] == "segment_scored"]
+        assert len(seg_events) == 1
+        assert "score" in seg_events[0][1]
+        assert "duration_ms" in seg_events[0][1]
+        assert seg_events[0][1]["decision"] in ("match", "no_match")
+
+    def test_session_ended_event_fires(self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake):
+        """on_event fires with 'session_ended' on session end."""
+        events = []
+        from modes.kiosk.pipeline import KioskPipeline
+        p = KioskPipeline(
+            config=base_config,
+            on_primary_speech=lambda s, e: None,
+            on_event=lambda et, pl: events.append((et, pl)),
+            _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
+        )
+        force_active_session(p, fake_wake)
+        p._end_session("stopped")
+        ended = [e for e in events if e[0] == "session_ended"]
+        assert len(ended) == 1
+        assert ended[0][1] == {"reason": "stopped"}
+
+    def test_on_event_exception_does_not_crash(self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake):
+        """An exception in on_event is swallowed by _safe_callback; pipeline continues."""
+        from modes.kiosk.pipeline import KioskPipeline
+        def buggy_event(event_type, payload):
+            raise RuntimeError("event handler broke")
+        p = KioskPipeline(
+            config=base_config,
+            on_primary_speech=lambda s, e: None,
+            on_event=buggy_event,
+            _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
+        )
+        # Should not raise even though on_event raises
+        force_active_session(p, fake_wake)
+        assert p._state == "ACTIVE_SESSION"

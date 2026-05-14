@@ -71,3 +71,19 @@ class TestWakeWordDetector:
         result = detector.process(np.zeros(480, dtype=np.float32))
         assert result is None
         fake_model.predict.assert_not_called()
+
+    def test_predict_called_with_int16_audio(self, detector, fake_model):
+        """The wrapper converts float32 [-1,1] audio to int16 PCM before passing to predict()."""
+        chunks_needed = (1280 + 479) // 480
+        # Feed audio with peaks at -1.0 and +1.0 to verify clipping doesn't overflow
+        signal = np.linspace(-1.0, 1.0, 480, dtype=np.float32)
+        for _ in range(chunks_needed):
+            detector.process(signal)
+        # Inspect the call args
+        assert fake_model.predict.called, "predict should have been called at least once"
+        call_args = fake_model.predict.call_args_list[0]
+        passed_audio = call_args[0][0]
+        assert passed_audio.dtype == np.int16, f"Expected int16, got {passed_audio.dtype}"
+        # Verify clipping: max int16 value should appear since we fed +1.0
+        assert passed_audio.max() == 32767, f"Expected max 32767, got {passed_audio.max()}"
+        assert passed_audio.min() == -32767, f"Expected min around -32767, got {passed_audio.min()}"
