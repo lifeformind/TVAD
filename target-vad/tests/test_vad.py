@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from vad.silero_vad import SileroVAD, SpeechSegment
+from core.vad.silero_vad import SileroVAD, SpeechSegment
 
 
 @pytest.fixture

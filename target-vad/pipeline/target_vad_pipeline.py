@@ -9,7 +9,7 @@ from core.audio.mic_stream import MicrophoneStream
 from speaker.embedder import EmbeddingExtractor
 from speaker.enrollment_store import EnrollmentStore
 from speaker.verifier import SpeakerVerifier, VerificationResult
-from vad.silero_vad import SileroVAD, SpeechSegment
+from core.vad.silero_vad import SileroVAD, SpeechSegment
 
 console = Console()
 

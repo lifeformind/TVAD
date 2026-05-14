@@ -8,7 +8,7 @@ import numpy as np
 import yaml
 
 from core.audio.mic_stream import MicrophoneStream
-from vad.silero_vad import SileroVAD, SpeechSegment
+from core.vad.silero_vad import SileroVAD, SpeechSegment
 
 
 def timed_stream(mic: MicrophoneStream, duration_s: float):

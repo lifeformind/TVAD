@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from pipeline.target_vad_pipeline import TargetVADPipeline
-from vad.silero_vad import SpeechSegment
+from core.vad.silero_vad import SpeechSegment
 from speaker.verifier import VerificationResult
 
 console = Console()

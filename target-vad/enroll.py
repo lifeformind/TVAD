@@ -15,7 +15,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from core.audio.mic_stream import MicrophoneStream
 from speaker.embedder import EmbeddingExtractor
 from speaker.enrollment_store import EnrollmentStore
-from vad.silero_vad import SileroVAD
+from core.vad.silero_vad import SileroVAD
 
 console = Console()
 
