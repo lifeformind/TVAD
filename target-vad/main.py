@@ -78,7 +78,7 @@ def main():
     config = load_config(args.config)
 
     if args.threshold is not None:
-        config["speaker"]["threshold"] = args.threshold
+        config["core"]["speaker"]["threshold"] = args.threshold
 
     pipeline = TargetVADPipeline(config)
     pipeline.verbose = args.verbose

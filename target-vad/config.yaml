@@ -1,23 +1,24 @@
-vad:
-  sample_rate: 16000
-  chunk_duration_ms: 30
-  speech_threshold: 0.5
-  min_speech_duration_ms: 300
-  padding_ms: 200
+core:
+  vad:
+    sample_rate: 16000
+    chunk_duration_ms: 30
+    speech_threshold: 0.5
+    min_speech_duration_ms: 300
+    padding_ms: 200
 
-speaker:
-  threshold: 0.75
-  min_segment_duration_ms: 800
-  enrollment_utterances: 5
-  enrollment_min_self_similarity: 0.6
-  enrollment_max_retries: 3
+  speaker:
+    threshold: 0.75
+    min_segment_duration_ms: 800
+    enrollment_utterances: 5
+    enrollment_min_self_similarity: 0.6
+    enrollment_max_retries: 3
 
-audio:
-  device_index: null
-  channels: 1
-  sample_rate: 16000
-  chunk_size: 480
+  audio:
+    device_index: null
+    channels: 1
+    sample_rate: 16000
+    chunk_size: 480
 
-paths:
-  voiceprints_dir: "./voiceprints"
-  silero_model_path: null
+  paths:
+    voiceprints_dir: "./voiceprints"
+    silero_model_path: null

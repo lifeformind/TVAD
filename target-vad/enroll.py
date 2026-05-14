@@ -39,9 +39,9 @@ def load_config(path: str = "config.yaml") -> dict:
 def cmd_enroll(args):
     """Record N utterances and enroll a new speaker."""
     config = load_config(args.config)
-    utterances = args.utterances or config["speaker"]["enrollment_utterances"]
-    min_self_sim = config["speaker"].get("enrollment_min_self_similarity", 0.6)
-    max_retries = config["speaker"].get("enrollment_max_retries", 3)
+    utterances = args.utterances or config["core"]["speaker"]["enrollment_utterances"]
+    min_self_sim = config["core"]["speaker"].get("enrollment_min_self_similarity", 0.6)
+    max_retries = config["core"]["speaker"].get("enrollment_max_retries", 3)
 
     console.print(Panel(
         f"Enrolling [bold cyan]{args.user}[/] with {utterances} utterances\n"
@@ -49,16 +49,16 @@ def cmd_enroll(args):
         title="Speaker Enrollment",
     ))
 
-    vad = SileroVAD(config["vad"])
+    vad = SileroVAD(config["core"]["vad"])
     embedder = EmbeddingExtractor()
-    store = EnrollmentStore(config["paths"]["voiceprints_dir"])
+    store = EnrollmentStore(config["core"]["paths"]["voiceprints_dir"])
 
     # Clear any previous partial enrollment
     utt_path = store._utterances_path(args.user)
     if os.path.exists(utt_path):
         os.remove(utt_path)
 
-    mic = MicrophoneStream(config["audio"])
+    mic = MicrophoneStream(config["core"]["audio"])
     accepted_embeddings = []  # in-memory; running mean computed for self-similarity gate
 
     for i in range(utterances):
@@ -135,7 +135,7 @@ def cmd_enroll(args):
 def cmd_list(args):
     """List all enrolled users."""
     config = load_config(args.config)
-    store = EnrollmentStore(config["paths"]["voiceprints_dir"])
+    store = EnrollmentStore(config["core"]["paths"]["voiceprints_dir"])
     users = store.list_users()
     if not users:
         console.print("[yellow]No enrolled users.[/]")
@@ -149,7 +149,7 @@ def cmd_list(args):
 def cmd_delete(args):
     """Delete a user's voiceprint."""
     config = load_config(args.config)
-    store = EnrollmentStore(config["paths"]["voiceprints_dir"])
+    store = EnrollmentStore(config["core"]["paths"]["voiceprints_dir"])
     if store.get(args.user) is None:
         console.print(f"[red]User '{args.user}' not found.[/]")
         return
@@ -160,12 +160,12 @@ def cmd_delete(args):
 def cmd_test(args):
     """Run a live verification test (shows scores without enrolling)."""
     config = load_config(args.config)
-    vad = SileroVAD(config["vad"])
+    vad = SileroVAD(config["core"]["vad"])
     embedder = EmbeddingExtractor()
-    store = EnrollmentStore(config["paths"]["voiceprints_dir"])
+    store = EnrollmentStore(config["core"]["paths"]["voiceprints_dir"])
 
     from core.speaker.verifier import SpeakerVerifier
-    verifier = SpeakerVerifier(store, config["speaker"]["threshold"])
+    verifier = SpeakerVerifier(store, config["core"]["speaker"]["threshold"])
 
     users = store.list_users()
     if not users:
@@ -173,7 +173,7 @@ def cmd_test(args):
         return
 
     console.print("[bold]Live verification test[/] — speak to see scores. Ctrl+C to stop.\n")
-    mic = MicrophoneStream(config["audio"])
+    mic = MicrophoneStream(config["core"]["audio"])
 
     try:
         with mic:

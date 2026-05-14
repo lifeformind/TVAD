@@ -19,14 +19,14 @@ class TargetVADPipeline:
 
     def __init__(self, config: dict):
         self.config = config
-        self.vad = SileroVAD(config["vad"])
+        self.vad = SileroVAD(config["core"]["vad"])
         self.embedder = EmbeddingExtractor()
-        self.store = EnrollmentStore(config["paths"]["voiceprints_dir"])
+        self.store = EnrollmentStore(config["core"]["paths"]["voiceprints_dir"])
         self.verifier = SpeakerVerifier(
-            self.store, config["speaker"]["threshold"]
+            self.store, config["core"]["speaker"]["threshold"]
         )
-        self.mic = MicrophoneStream(config["audio"])
-        self.min_segment_ms = config["speaker"].get("min_segment_duration_ms", 800)
+        self.mic = MicrophoneStream(config["core"]["audio"])
+        self.min_segment_ms = config["core"]["speaker"].get("min_segment_duration_ms", 800)
         self._running = False
         self.verbose = False
 

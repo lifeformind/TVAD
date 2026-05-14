@@ -29,8 +29,8 @@ def main():
     print("Speak into your mic to test speech detection...")
     print(flush=True)
 
-    vad = SileroVAD(config["vad"])
-    mic = MicrophoneStream(config["audio"])
+    vad = SileroVAD(config["core"]["vad"])
+    mic = MicrophoneStream(config["core"]["audio"])
     segments: list[SpeechSegment] = []
     start = time.time()
 
