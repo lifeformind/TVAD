@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from speaker.enrollment_store import EnrollmentStore
+from core.speaker.enrollment_store import EnrollmentStore
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
