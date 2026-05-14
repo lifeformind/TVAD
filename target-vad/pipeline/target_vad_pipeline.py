@@ -5,7 +5,7 @@ from typing import Callable, Optional
 
 from rich.console import Console
 
-from audio.mic_stream import MicrophoneStream
+from core.audio.mic_stream import MicrophoneStream
 from speaker.embedder import EmbeddingExtractor
 from speaker.enrollment_store import EnrollmentStore
 from speaker.verifier import SpeakerVerifier, VerificationResult

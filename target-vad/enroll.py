@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from audio.mic_stream import MicrophoneStream
+from core.audio.mic_stream import MicrophoneStream
 from speaker.embedder import EmbeddingExtractor
 from speaker.enrollment_store import EnrollmentStore
 from vad.silero_vad import SileroVAD

@@ -7,7 +7,7 @@ import time
 import numpy as np
 import yaml
 
-from audio.mic_stream import MicrophoneStream
+from core.audio.mic_stream import MicrophoneStream
 from vad.silero_vad import SileroVAD, SpeechSegment
 
 
