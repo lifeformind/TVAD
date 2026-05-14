@@ -90,3 +90,31 @@ class TestSileroVADStream:
         )
         assert seg.duration_ms == 1000.0
         assert len(seg.audio) == 16000
+
+
+class TestSileroVADChunkAPI:
+    def test_process_chunk_returns_list(self, vad):
+        """process_chunk() returns a list (possibly empty) per call."""
+        silence = np.zeros(480, dtype=np.float32)
+        result = vad.process_chunk(silence)
+        assert isinstance(result, list)
+
+    def test_process_chunk_silence_yields_no_segments(self, vad):
+        """Feeding silence chunks one at a time should not yield segments."""
+        vad.reset()
+        silence = np.zeros(480, dtype=np.float32)
+        all_segments = []
+        for _ in range(int(2.0 * 16000 / 480)):  # ~2 seconds
+            all_segments.extend(vad.process_chunk(silence))
+        assert all_segments == []
+
+    def test_process_stream_uses_process_chunk(self, vad):
+        """process_stream is a thin wrapper — must yield same as iterating process_chunk."""
+        vad.reset()
+        chunks = [np.zeros(480, dtype=np.float32) for _ in range(20)]
+        via_stream = list(vad.process_stream(iter(chunks)))
+        vad.reset()
+        via_chunk = []
+        for c in chunks:
+            via_chunk.extend(vad.process_chunk(c))
+        assert len(via_stream) == len(via_chunk)
