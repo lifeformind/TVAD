@@ -2,6 +2,7 @@
 
 import compat  # noqa: F401 — torchaudio/speechbrain shim
 import argparse
+import os
 import sys
 import time
 
@@ -18,6 +19,17 @@ from vad.silero_vad import SileroVAD
 
 console = Console()
 
+# Phonetically diverse pangrams + tongue-twisters. Cycled if more than 7 utterances requested.
+ENROLLMENT_SENTENCES = [
+    "The quick brown fox jumps over the lazy dog.",
+    "Pack my box with five dozen liquor jugs.",
+    "How vexingly quick daft zebras jump.",
+    "Sphinx of black quartz, judge my vow.",
+    "The five boxing wizards jump quickly.",
+    "She sells seashells down by the seashore.",
+    "Peter Piper picked a peck of pickled peppers.",
+]
+
 
 def load_config(path: str = "config.yaml") -> dict:
     with open(path) as f:
@@ -28,9 +40,12 @@ def cmd_enroll(args):
     """Record N utterances and enroll a new speaker."""
     config = load_config(args.config)
     utterances = args.utterances or config["speaker"]["enrollment_utterances"]
+    min_self_sim = config["speaker"].get("enrollment_min_self_similarity", 0.6)
+    max_retries = config["speaker"].get("enrollment_max_retries", 3)
 
     console.print(Panel(
-        f"Enrolling [bold cyan]{args.user}[/] with {utterances} utterances",
+        f"Enrolling [bold cyan]{args.user}[/] with {utterances} utterances\n"
+        f"Self-similarity gate: ≥ {min_self_sim:.2f} (max {max_retries} retries per utterance)",
         title="Speaker Enrollment",
     ))
 
@@ -40,33 +55,62 @@ def cmd_enroll(args):
 
     # Clear any previous partial enrollment
     utt_path = store._utterances_path(args.user)
-    import os
     if os.path.exists(utt_path):
         os.remove(utt_path)
 
     mic = MicrophoneStream(config["audio"])
+    accepted_embeddings = []  # in-memory; running mean computed for self-similarity gate
 
     for i in range(utterances):
-        console.print(f"\n[bold yellow]Utterance {i + 1}/{utterances}[/] — Speak now...")
-        vad.reset()
+        sentence = ENROLLMENT_SENTENCES[i % len(ENROLLMENT_SENTENCES)]
+        accepted = False
 
-        with mic:
-            segment = None
-            for seg in vad.process_stream(mic.stream()):
-                segment = seg
-                break  # Take the first speech segment
+        for attempt in range(1, max_retries + 1):
+            retry_tag = f"  [dim](attempt {attempt}/{max_retries})[/]" if attempt > 1 else ""
+            console.print(f"\n[bold yellow]Utterance {i + 1}/{utterances}[/]{retry_tag}")
+            console.print(f"  Read aloud: [bold cyan]\"{sentence}\"[/]")
+            console.print("  [dim]Speak now...[/]")
+            vad.reset()
 
-        if segment is None:
-            console.print("[red]No speech detected. Try again.[/]")
-            continue
+            with mic:
+                segment = None
+                for seg in vad.process_stream(mic.stream()):
+                    segment = seg
+                    break  # Take the first speech segment
 
-        console.print(
-            f"  Captured {segment.duration_ms:.0f}ms of speech"
-        )
+            if segment is None:
+                console.print("  [red]No speech detected.[/]")
+                continue
 
-        embedding = embedder.extract(segment.audio)
-        store.enroll(args.user, embedding)
-        console.print(f"  [green]Utterance {i + 1} stored[/] (embedding dim={len(embedding)})")
+            console.print(f"  Captured {segment.duration_ms:.0f}ms of speech")
+            embedding = embedder.extract(segment.audio)
+
+            if accepted_embeddings:
+                running_mean = np.mean(accepted_embeddings, axis=0)
+                rm_norm = np.linalg.norm(running_mean)
+                if rm_norm > 0:
+                    running_mean = running_mean / rm_norm
+                sim = float(np.dot(embedding, running_mean))
+                if sim < min_self_sim:
+                    console.print(
+                        f"  [red]Rejected[/] — similarity to your prior utterances = {sim:.3f} "
+                        f"(need ≥ {min_self_sim:.2f}). Re-reading the same sentence."
+                    )
+                    continue
+                console.print(f"  [green]Accepted[/] (similarity = {sim:.3f})")
+            else:
+                console.print("  [green]Accepted[/] (seed utterance)")
+
+            accepted_embeddings.append(embedding)
+            store.enroll(args.user, embedding)
+            accepted = True
+            break
+
+        if not accepted:
+            console.print(
+                f"  [red]Giving up on utterance {i + 1} after {max_retries} attempts. "
+                f"Continuing with remaining utterances.[/]"
+            )
 
         if i < utterances - 1:
             time.sleep(0.5)
@@ -79,7 +123,7 @@ def cmd_enroll(args):
         console.print(Panel(
             f"[bold green]Enrollment complete![/]\n"
             f"User: {args.user}\n"
-            f"Utterances: {count}\n"
+            f"Utterances accepted: {count}/{utterances}\n"
             f"Embedding norm: {np.linalg.norm(vp):.4f}\n"
             f"Embedding mean: {np.mean(vp):.6f}",
             title="Success",
