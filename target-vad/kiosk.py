@@ -33,7 +33,23 @@ def make_dryrun_callbacks():
         console.print(f"[bold yellow][SESSION ENDED][/] reason={reason}\n")
         console.print('[dim][IDLE] Listening for wake phrase...[/]')
 
-    return on_primary_speech, on_session_started, on_session_ended
+    def on_event(event_type: str, payload: dict):
+        if event_type == "wake_detected":
+            console.print(
+                f"[magenta][WAKE][/] phrase={payload['phrase']} "
+                f"score={payload['score']:.3f}"
+            )
+        elif event_type == "segment_scored":
+            color = "green" if payload["decision"] == "match" else "dim"
+            tag = "MATCH" if payload["decision"] == "match" else "no_match"
+            console.print(
+                f"[{color}][SCORED][/] {payload['duration_ms']:.0f}ms "
+                f"score={payload['score']:.3f} → {tag}"
+            )
+        # session_started / session_ended are already covered by named callbacks;
+        # we don't double-print them here.
+
+    return on_primary_speech, on_session_started, on_session_ended, on_event
 
 
 def main():
@@ -60,7 +76,7 @@ def main():
         console.print(
             "[yellow]No downstream handler configured. Running in dry-run mode.[/]"
         )
-    on_primary, on_started, on_ended = make_dryrun_callbacks()
+    on_primary, on_started, on_ended, on_event = make_dryrun_callbacks()
 
     console.print(
         f"[bold][IDLE][/] Listening for [bold cyan]\"{config['kiosk']['wake_phrase']}\"[/]..."
@@ -70,6 +86,7 @@ def main():
         on_primary_speech=on_primary,
         on_session_started=on_started,
         on_session_ended=on_ended,
+        on_event=on_event,
     )
     try:
         pipeline.run()
