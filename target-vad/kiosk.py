@@ -2,7 +2,6 @@
 
 from core import compat  # noqa: F401 — torchaudio/speechbrain shim
 import argparse
-import time
 
 import numpy as np
 import yaml
@@ -55,15 +54,13 @@ def main():
     if args.wake_phrase:
         config["kiosk"]["wake_phrase"] = args.wake_phrase
 
-    if args.dry_run:
-        on_primary, on_started, on_ended = make_dryrun_callbacks()
-    else:
+    if not args.dry_run:
         # No real downstream handler is configured yet — fall back to dry-run
         # behavior with a warning.
         console.print(
             "[yellow]No downstream handler configured. Running in dry-run mode.[/]"
         )
-        on_primary, on_started, on_ended = make_dryrun_callbacks()
+    on_primary, on_started, on_ended = make_dryrun_callbacks()
 
     console.print(
         f"[bold][IDLE][/] Listening for [bold cyan]\"{config['kiosk']['wake_phrase']}\"[/]..."
