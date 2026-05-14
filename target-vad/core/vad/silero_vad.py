@@ -72,7 +72,7 @@ class SileroVAD:
             prob = self._model(tensor, self.sample_rate).item()
         return prob
 
-    def process_chunk(self, chunk: np.ndarray) -> list:
+    def process_chunk(self, chunk: np.ndarray) -> list[SpeechSegment]:
         """Stateful: feed one audio chunk, return any speech segments completed by this chunk.
 
         Buffers incoming audio to 512-sample Silero frames, tracks speech/silence

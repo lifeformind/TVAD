@@ -117,4 +117,4 @@ class TestSileroVADChunkAPI:
         via_chunk = []
         for c in chunks:
             via_chunk.extend(vad.process_chunk(c))
-        assert len(via_stream) == len(via_chunk)
+        assert via_stream == via_chunk
