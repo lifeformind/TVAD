@@ -94,6 +94,7 @@ class ClusterIdentifier:
             if score > best_score:
                 best_score = score
                 best_id = id
+        # Small epsilon absorbs float32 roundoff when score is mathematically at threshold.
         if best_id is not None and best_score >= self.threshold - 1e-6:
             return best_id
         return "unknown"
