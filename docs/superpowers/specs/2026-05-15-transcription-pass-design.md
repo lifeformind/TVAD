@@ -64,6 +64,7 @@ faster-whisper handles model loading, device placement, and word-level timestamp
 
 - `text`: full segment transcription as a single string. Empty string `""` when whisper returns nothing (silent or sub-100 ms segments).
 - `words`: list of `{start, end, word, probability}` objects, in order. Always present, may be empty when text is empty.
+- **Word `start` / `end` are WAV-absolute, not clip-relative.** A word inside a segment that starts at 0.42 s has its own `start` measured from t=0 of the WAV (so a word at the start of that segment has `start: 0.42`). This matches the segment's own `start`/`end` semantics and lets consumers seek directly into the original audio. The conversion (clip-relative → absolute) happens in `transcribe.py`, not in `WhisperRunner` — the runner stays purely faster-whisper-output-shaped.
 
 **Top-level additions:**
 
@@ -174,6 +175,8 @@ This gives whisper enough discourse context to disambiguate disfluencies and pro
 | Whisper model download / load fails | 3 | message + abort |
 | Per-segment whisper crash | 0 | warning + null marker, continue |
 | Atomic write failure (disk full, permission) | 3 | message + abort, original JSON untouched |
+
+The model load is performed eagerly via `WhisperRunner.load()` before the per-segment transcription loop, so download or configuration failures surface immediately with `EXIT_MODEL_OR_IO` rather than being swallowed by the per-segment exception handler.
 
 ## diarize.py change
 

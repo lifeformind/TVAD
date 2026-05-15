@@ -132,13 +132,22 @@ def main(argv: List[str] = None) -> int:
             seg.pop("text", None)
             seg.pop("words", None)
 
-    # Build runner
+    # Build runner; eagerly load the model so download / config failures surface here
+    # rather than getting masked by the per-segment exception handler later.
     runner = WhisperRunner(
         model=trans_cfg["model"],
         language=trans_cfg.get("language"),
         device=trans_cfg.get("device", "cpu"),
         compute_type=trans_cfg.get("compute_type", "int8"),
     )
+    try:
+        runner.load()
+    except Exception as exc:
+        console.print(
+            f"[red]Failed to load whisper model {trans_cfg['model']!r}:[/] {exc}\n"
+            "[dim]Check your network, HuggingFace cache, and config.transcription.model.[/]"
+        )
+        return EXIT_MODEL_OR_IO
 
     # Build rolling-context window
     initial_prompt_chars = int(trans_cfg.get("initial_prompt_chars", 200))
@@ -175,15 +184,21 @@ def main(argv: List[str] = None) -> int:
             slice_audio = audio[start_i:end_i]
             try:
                 text, words = runner.transcribe(slice_audio, initial_prompt=ctx.text())
+                # Convert clip-relative word timestamps to WAV-absolute.
+                seg_start = float(seg["start"])
+                absolute_words = [
+                    {**w, "start": w["start"] + seg_start, "end": w["end"] + seg_start}
+                    for w in words
+                ]
                 seg["text"] = text
-                seg["words"] = words
+                seg["words"] = absolute_words
                 if text:
                     ctx.append(text)
                 transcribed_count += 1
             except Exception as exc:
-                logger.warning(
-                    "transcription failed for segment [%.2f, %.2f]: %s",
-                    seg["start"], seg["end"], exc,
+                console.print(
+                    f"[yellow]warning:[/] transcription failed for segment "
+                    f"[{seg['start']:.2f}, {seg['end']:.2f}]: {exc}"
                 )
                 seg["text"] = None
                 seg["words"] = []

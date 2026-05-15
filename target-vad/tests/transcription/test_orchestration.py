@@ -55,6 +55,9 @@ def stub_runner(monkeypatch):
             self.model = model
             self.language = language
 
+        def load(self):
+            pass
+
         def transcribe(self, audio, initial_prompt):
             calls.append({
                 "audio_samples": int(len(audio)),
@@ -83,6 +86,11 @@ class TestTranscribeOrchestration:
         assert data["segments"][0]["text"] == "text_1"
         assert data["segments"][1]["text"] == "text_2"
         assert data["segments"][0]["words"][0]["word"] == "word1"
+        # Word timestamps are WAV-absolute: segment 0 starts at 0.0, so word stays at 0.0
+        assert data["segments"][0]["words"][0]["start"] == 0.0
+        # Segment 1 starts at 10.0, so the clip-relative 0.0 becomes 10.0 absolute
+        assert data["segments"][1]["words"][0]["start"] == 10.0
+        assert data["segments"][1]["words"][0]["end"] == 11.0
         assert len(stub_runner) == 2
 
     def test_passes_run_gains_transcription(self, tmp_workspace, stub_runner):
@@ -183,3 +191,48 @@ class TestTranscribeOrchestration:
             json.dump(bad, f)
         rc = transcribe.main([tmp_workspace["json"], "--config", "config.yaml"])
         assert rc == 2
+
+    def test_per_segment_exception_marks_segment_null(self, tmp_workspace, monkeypatch):
+        """If runner.transcribe raises, that segment gets text=None, words=[], exit 0 (other segments proceed)."""
+        call_count = [0]
+
+        class PartialFailingRunner:
+            def __init__(self, *a, **kw):
+                pass
+
+            def load(self):
+                pass
+
+            def transcribe(self, audio, initial_prompt):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise RuntimeError("simulated whisper crash on segment 0")
+                return ("ok_text", [{"start": 0.0, "end": 1.0, "word": "ok", "probability": 0.9}])
+
+        monkeypatch.setattr(transcribe, "WhisperRunner", PartialFailingRunner)
+        rc = transcribe.main([tmp_workspace["json"], "--config", "config.yaml"])
+        assert rc == 0
+        data = _read_json(tmp_workspace["json"])
+        assert data["segments"][0]["text"] is None
+        assert data["segments"][0]["words"] == []
+        # Second segment still transcribed normally
+        assert data["segments"][1]["text"] == "ok_text"
+
+    def test_model_load_failure_exits_3(self, tmp_workspace, monkeypatch):
+        """Model load failure (HF down, bad model) surfaces as exit 3, not silent all-null."""
+        class FailingLoadRunner:
+            def __init__(self, *a, **kw):
+                pass
+
+            def load(self):
+                raise RuntimeError("simulated model download failure")
+
+            def transcribe(self, audio, initial_prompt):
+                raise AssertionError("transcribe should never be called when load fails")
+
+        monkeypatch.setattr(transcribe, "WhisperRunner", FailingLoadRunner)
+        rc = transcribe.main([tmp_workspace["json"], "--config", "config.yaml"])
+        assert rc == 3
+        # JSON should NOT have been modified (load failure exits before write)
+        data = _read_json(tmp_workspace["json"])
+        assert "text" not in data["segments"][0]

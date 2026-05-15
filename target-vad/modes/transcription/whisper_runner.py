@@ -48,6 +48,10 @@ class WhisperRunner:
             )
         return self._model
 
+    def load(self) -> None:
+        """Eagerly load the model. Use this to surface load errors before the transcription loop."""
+        self._ensure_model()
+
     def transcribe(
         self,
         audio: np.ndarray,

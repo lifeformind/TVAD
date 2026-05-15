@@ -111,3 +111,15 @@ class TestWhisperRunner:
             runner.transcribe(np.zeros(SR, dtype=np.float32), initial_prompt="")
             args, _ = Cls.call_args
             assert args[0] == "openai/whisper-large-v3-turbo"
+
+    def test_load_triggers_model_construction(self):
+        """load() is a public eager-load entry point — useful to surface download errors early."""
+        with patch("modes.transcription.whisper_runner.WhisperModel") as Cls:
+            Cls.return_value = _make_mock_model([])
+            runner = WhisperRunner(model="small", language="en", device="cpu", compute_type="int8")
+            Cls.assert_not_called()
+            runner.load()
+            Cls.assert_called_once_with("small", device="cpu", compute_type="int8")
+            # Second load() call should NOT trigger a second model construction
+            runner.load()
+            Cls.assert_called_once()
