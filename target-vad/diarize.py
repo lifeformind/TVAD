@@ -127,7 +127,7 @@ def main(argv: List[str] = None) -> int:
         )
         labels = identifier.label_clusters(audio, sample_rate=16000, clusters=clusters)
         for cid, label in labels.items():
-            console.print(f"  [dim]{cid}[/] → [bold]{label}[/]")
+            console.print(f"  [dim]{cid}[/] -> [bold]{label}[/]")
 
     # Build output
     segments = flatten_clusters(clusters, labels)
