@@ -64,7 +64,6 @@ def main(argv: List[str] = None) -> int:
     parser.add_argument("--out", default=None, help="Output JSON path (default: <input>.diarization.json)")
     parser.add_argument("--rttm", action="store_true", help="Also write an RTTM file alongside the JSON")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
-    parser.add_argument("--log", action="store_true", help="Reserved — JSON-lines event log (not yet wired)")
     args = parser.parse_args(argv)
 
     if not os.path.exists(args.input):
@@ -72,7 +71,14 @@ def main(argv: List[str] = None) -> int:
         return EXIT_BAD_INPUT
 
     config = load_config(args.config)
-    diar_cfg = config["diarization"]
+    try:
+        diar_cfg = config["diarization"]
+    except KeyError:
+        console.print(
+            f"[red]Config file {args.config!r} is missing the [bold]diarization:[/bold] block.[/] "
+            "See [dim]config.yaml.example[/] or the project README for the expected shape."
+        )
+        return EXIT_CONFIG_OR_MODEL
     hf_token_var = diar_cfg["hf_token_env_var"]
     hf_token = os.environ.get(hf_token_var, "")
     if not hf_token:

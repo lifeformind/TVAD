@@ -36,7 +36,6 @@ kiosk:
 
 diarization:
   identification_threshold: 0.55
-  default_output_format: "json"   # or "rttm"
   pyannote_pipeline: "pyannote/speaker-diarization-3.1"
   hf_token_env_var: "HF_TOKEN"
   centroid_max_sample_seconds: 30
