@@ -1,8 +1,9 @@
 """JSON and RTTM serializers for diarization output.
 
-JSON schema is documented in docs/superpowers/specs/2026-05-14-classroom-diarization-design.md.
-RTTM is the standard NIST speaker-diarization format:
-    SPEAKER <file-id> 1 <start> <duration> <NA> <NA> <speaker> <NA> <NA>
+JSON schema is documented in
+docs/superpowers/specs/2026-05-15-in-session-enrollment-design.md.
+RTTM uses the standard NIST format with the speaker_id (not display name) in
+the speaker column (field 8) — RTTM consumers expect stable tokens.
 """
 
 import json
@@ -12,21 +13,28 @@ from typing import Any, Dict, List
 
 @dataclass
 class DiarizationSegment:
-    """One timestamped, labeled speech segment."""
+    """One timestamped, labeled speech segment.
+
+    speaker_id is the stable storage key (id from EnrollmentStore or the literal
+    'unknown'). speaker is the display name (free-form string from users.json or
+    'unknown' when speaker_id == 'unknown').
+    """
     start: float
     end: float
-    speaker: str  # enrolled name or the literal "unknown"
+    speaker_id: str
+    speaker: str
 
 
-def _enrolled_users_in_first_appearance_order(segments: List[DiarizationSegment]) -> List[str]:
+def _enrolled_users_in_first_appearance_order(segments: List[DiarizationSegment]) -> List[Dict[str, str]]:
+    """Return list of {id, name} objects deduped by id, in first-appearance order."""
     seen = set()
     result = []
     for s in segments:
-        if s.speaker == "unknown":
+        if s.speaker_id == "unknown":
             continue
-        if s.speaker not in seen:
-            seen.add(s.speaker)
-            result.append(s.speaker)
+        if s.speaker_id not in seen:
+            seen.add(s.speaker_id)
+            result.append({"id": s.speaker_id, "name": s.speaker})
     return result
 
 
@@ -47,7 +55,8 @@ def write_json(
         "config": config,
         "enrolled_users_matched": _enrolled_users_in_first_appearance_order(segments),
         "segments": [
-            {"start": s.start, "end": s.end, "speaker": s.speaker} for s in segments
+            {"start": s.start, "end": s.end, "speaker_id": s.speaker_id, "speaker": s.speaker}
+            for s in segments
         ],
     }
     with open(path, "w", encoding="utf-8") as f:
@@ -60,12 +69,12 @@ def write_rttm(
     audio_file_id: str,
     segments: List[DiarizationSegment],
 ) -> None:
-    """Write segments as RTTM. Empty segments → empty file."""
+    """Write segments as RTTM. The speaker column uses speaker_id (stable token)."""
     lines = []
     for s in segments:
         duration = s.end - s.start
         lines.append(
-            f"SPEAKER {audio_file_id} 1 {s.start:.3f} {duration:.3f} <NA> <NA> {s.speaker} <NA> <NA>"
+            f"SPEAKER {audio_file_id} 1 {s.start:.3f} {duration:.3f} <NA> <NA> {s.speaker_id} <NA> <NA>"
         )
     content = "\n".join(lines)
     if content:
