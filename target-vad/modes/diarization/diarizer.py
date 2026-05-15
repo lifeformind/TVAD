@@ -32,7 +32,7 @@ class Diarizer:
             return
         from pyannote.audio import Pipeline
         logger.info("Loading pyannote pipeline %s (first call may download model)", self.pipeline_name)
-        self._pipeline = Pipeline.from_pretrained(self.pipeline_name, use_auth_token=self.hf_token)
+        self._pipeline = Pipeline.from_pretrained(self.pipeline_name, token=self.hf_token)
 
     def diarize(
         self,
