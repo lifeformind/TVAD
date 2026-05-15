@@ -42,7 +42,7 @@ def fake_store():
 
 class TestClusterIdentifierBasics:
     def test_matches_enrolled_speaker(self, fake_embedder, fake_store):
-        """Embedder returns alice's voiceprint exactly → cluster labels as 'alice'."""
+        """Embedder returns alice's voiceprint exactly → cluster labels as id 'alice'."""
         alice_vp = unit_vec(seed=1)
         bob_vp = unit_vec(seed=2)
         fake_store.get_all.return_value = {"alice": alice_vp, "bob": bob_vp}
@@ -109,7 +109,7 @@ class TestClusterIdentifierBasics:
         fake_embedder.extract.assert_not_called()  # nothing to compare against
 
     def test_picks_best_match_among_multiple(self, fake_embedder, fake_store):
-        """Highest-cosine enrolled user wins."""
+        """Highest-cosine enrolled id wins."""
         alice_vp = unit_vec(seed=1)
         bob_vp = unit_vec(seed=2)
         fake_store.get_all.return_value = {"alice": alice_vp, "bob": bob_vp}

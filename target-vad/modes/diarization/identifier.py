@@ -6,8 +6,9 @@ For each cluster, the identifier:
   3. Embeds via the injected ECAPA EmbeddingExtractor → 192-dim L2-normalized vector.
      (EmbeddingExtractor already L2-normalizes; concat-then-embed-once produces a
      single embedding that is itself a kind of centroid because ECAPA pools internally.)
-  4. Cosine-matches against all enrolled voiceprints; assigns the best-scoring name
-     if score >= threshold else the literal string "unknown".
+  4. Cosine-matches against all enrolled voiceprints; assigns the best-scoring id
+     if score >= threshold else the literal string "unknown". Display name lookup
+     is the caller's responsibility (via store.get_name(id) or SessionEnrollmentView).
 
 If embedding fails for any cluster, that cluster is labeled "unknown" and processing
 continues for the rest.
@@ -85,14 +86,14 @@ class ClusterIdentifier:
         return np.concatenate(chunks)
 
     def _best_label(self, embedding: np.ndarray, voiceprints: Dict[str, np.ndarray]) -> str:
-        best_name = None
+        """Return the best-matching enrolled id, or 'unknown' if no match clears threshold."""
+        best_id = None
         best_score = -1.0
-        for name, vp in voiceprints.items():
+        for id, vp in voiceprints.items():
             score = cosine_similarity(embedding, vp)
             if score > best_score:
                 best_score = score
-                best_name = name
-        # Small epsilon absorbs float32 roundoff when score is mathematically at threshold.
-        if best_name is not None and best_score >= self.threshold - 1e-6:
-            return best_name
+                best_id = id
+        if best_id is not None and best_score >= self.threshold - 1e-6:
+            return best_id
         return "unknown"
