@@ -39,3 +39,4 @@ diarization:
   pyannote_pipeline: "pyannote/speaker-diarization-3.1"
   hf_token_env_var: "HF_TOKEN"
   centroid_max_sample_seconds: 30
+  intro_override_warn_threshold: 0.30   # warn if intro voiceprint disagrees with same-id persistent voiceprint
