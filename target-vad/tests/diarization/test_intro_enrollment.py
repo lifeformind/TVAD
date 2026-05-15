@@ -92,6 +92,30 @@ class TestEnrollFromIntros:
         assert result == []
         fake_embedder.extract.assert_not_called()
 
+    def test_warns_on_start_past_audio_end(self, fake_embedder, caplog):
+        import logging
+        fake_embedder.extract.return_value = unit_vec(1)
+        audio = np.zeros(30 * SR, dtype=np.float32)  # 30 s of audio
+        manifest = [ManifestEntry(id="ghost", name="Ghost", start=45.0, end=60.0)]
+        with caplog.at_level(logging.WARNING, logger="modes.diarization.intro_enrollment"):
+            result = enroll_from_intros(audio, SR, manifest, fake_embedder)
+        # Entry is not silently dropped — voiceprint is still produced
+        assert len(result) == 1
+        assert result[0].id == "ghost"
+        # Warning surfaces the issue
+        assert any("past audio end" in rec.message for rec in caplog.records)
+
+    def test_warns_on_short_slice(self, fake_embedder, caplog):
+        import logging
+        fake_embedder.extract.return_value = unit_vec(1)
+        audio = np.zeros(30 * SR, dtype=np.float32)
+        # 500 ms slice — below ECAPA's 800 ms minimum
+        manifest = [ManifestEntry(id="brief", name="Brief", start=1.0, end=1.5)]
+        with caplog.at_level(logging.WARNING, logger="modes.diarization.intro_enrollment"):
+            result = enroll_from_intros(audio, SR, manifest, fake_embedder)
+        assert len(result) == 1
+        assert any("below ECAPA's" in rec.message for rec in caplog.records)
+
 
 class TestSessionEnrollmentView:
     def test_empty_intros_returns_persistent(self, fake_store):

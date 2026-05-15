@@ -55,7 +55,7 @@ class SpeakerVerifier:
                 all_scores={},
             )
 
-        scores = {id: cosine_similarity(embedding, vp) for id, vp in voiceprints.items()}
+        scores = {user_id: cosine_similarity(embedding, vp) for user_id, vp in voiceprints.items()}
         best_id = max(scores, key=scores.get)
         best_score = scores[best_id]
         is_match = best_score >= self.threshold

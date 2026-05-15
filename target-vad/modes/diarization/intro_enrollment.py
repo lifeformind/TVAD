@@ -27,6 +27,12 @@ class IntroVoiceprint:
     embedding: np.ndarray
 
 
+# 800 ms at 16 kHz — matches EmbeddingExtractor.MIN_DURATION_SAMPLES. Slices shorter
+# than this are reflect-padded inside the embedder; the resulting embedding is
+# unreliable, so we warn upstream where the manifest entry id is visible.
+_MIN_INTRO_DURATION_S = 0.8
+
+
 def enroll_from_intros(
     audio: np.ndarray,
     sample_rate: int,
@@ -35,8 +41,11 @@ def enroll_from_intros(
 ) -> List[IntroVoiceprint]:
     """Embed each manifest entry's audio slice.
 
-    End-of-audio is clamped silently (a warning is logged); no other validation
-    happens here — load_manifest() already enforced ordering and types.
+    End-of-audio is clamped silently (a warning is logged); slices that fall past
+    the audio end or are shorter than ECAPA's MIN_DURATION (800 ms) produce a
+    warning but still emit a (potentially low-quality) embedding so the manifest
+    entry isn't silently dropped. No other validation happens here —
+    load_manifest() already enforced ordering and types.
     """
     audio_len_s = len(audio) / sample_rate
     results: List[IntroVoiceprint] = []
@@ -47,8 +56,21 @@ def enroll_from_intros(
                 "intro '%s' end=%.2fs exceeds audio length %.2fs; clamping",
                 entry.id, entry.end, audio_len_s,
             )
+        if entry.start >= audio_len_s:
+            logger.warning(
+                "intro '%s' start=%.2fs is past audio end %.2fs; "
+                "embedding will be silence-padded and unreliable",
+                entry.id, entry.start, audio_len_s,
+            )
         start_i = max(0, int(entry.start * sample_rate))
         end_i = max(start_i, int(end_clamped * sample_rate))
+        slice_duration_s = (end_i - start_i) / sample_rate
+        if 0 < slice_duration_s < _MIN_INTRO_DURATION_S:
+            logger.warning(
+                "intro '%s' slice is %.2fs, below ECAPA's %.2fs minimum; "
+                "embedder will reflect-pad and result may be unreliable",
+                entry.id, slice_duration_s, _MIN_INTRO_DURATION_S,
+            )
         slice_audio = audio[start_i:end_i]
         embedding = embedder.extract(slice_audio, sample_rate=sample_rate)
         results.append(IntroVoiceprint(id=entry.id, name=entry.name, embedding=embedding))
@@ -69,11 +91,11 @@ class SessionEnrollmentView:
 
     def get_all(self) -> Dict[str, np.ndarray]:
         merged: Dict[str, np.ndarray] = dict(self._persistent.get_all())
-        for id, ivp in self._intros.items():
-            merged[id] = ivp.embedding
+        for user_id, ivp in self._intros.items():
+            merged[user_id] = ivp.embedding
         return merged
 
-    def get_name(self, id: str) -> str:
-        if id in self._intros:
-            return self._intros[id].name
-        return self._persistent.get_name(id)
+    def get_name(self, user_id: str) -> str:
+        if user_id in self._intros:
+            return self._intros[user_id].name
+        return self._persistent.get_name(user_id)

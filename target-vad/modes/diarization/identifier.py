@@ -89,11 +89,11 @@ class ClusterIdentifier:
         """Return the best-matching enrolled id, or 'unknown' if no match clears threshold."""
         best_id = None
         best_score = -1.0
-        for id, vp in voiceprints.items():
+        for user_id, vp in voiceprints.items():
             score = cosine_similarity(embedding, vp)
             if score > best_score:
                 best_score = score
-                best_id = id
+                best_id = user_id
         # Small epsilon absorbs float32 roundoff when score is mathematically at threshold.
         if best_id is not None and best_score >= self.threshold - 1e-6:
             return best_id
