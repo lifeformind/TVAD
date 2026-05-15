@@ -40,3 +40,10 @@ diarization:
   hf_token_env_var: "HF_TOKEN"
   centroid_max_sample_seconds: 30
   intro_override_warn_threshold: 0.30   # warn if intro voiceprint disagrees with same-id persistent voiceprint
+
+transcription:
+  model: "small"              # preset shortcut or any faster-whisper-compatible model identifier
+  language: "en"              # ISO 639-1 code; set to null to let whisper auto-detect per call
+  initial_prompt_chars: 200   # rolling-context window passed to whisper.transcribe(initial_prompt=...)
+  device: "cpu"               # "cpu" on this hardware; "cuda" is reserved for future GPU work
+  compute_type: "int8"        # int8 quantization is CPU-optimal; "float32" trades ~2x speed for ~1% WER
