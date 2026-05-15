@@ -91,6 +91,64 @@ class TestEnrollmentStore:
         assert "alice" in all_vp
         assert len(all_vp["alice"]) == 192
 
+    def test_register_and_get_name(self, store):
+        store.register("alice_smith", "Alice")
+        assert store.get_name("alice_smith") == "Alice"
+
+    def test_get_name_unregistered_raises(self, store):
+        with pytest.raises(KeyError):
+            store.get_name("nobody")
+
+    def test_finalize_enrollment_auto_registers(self, store):
+        emb = random_unit_vector()
+        store.enroll("siddharth", emb)
+        store.finalize_enrollment("siddharth")
+        # Auto-registered with name == id
+        assert store.get_name("siddharth") == "siddharth"
+
+    def test_register_overrides_auto_name(self, store):
+        emb = random_unit_vector()
+        store.enroll("siddharth", emb)
+        store.finalize_enrollment("siddharth")  # auto-registers name="siddharth"
+        store.register("siddharth", "Siddharth Jain")
+        assert store.get_name("siddharth") == "Siddharth Jain"
+
+    def test_orphan_npy_ignored_by_get_all(self, store, temp_dir):
+        # Drop a stray .npy file directly into the voiceprints dir, never registered
+        import numpy as np
+        orphan = random_unit_vector()
+        np.save(os.path.join(temp_dir, "stranger.npy"), orphan)
+        # Also enroll one legit user
+        store.enroll("alice", random_unit_vector())
+        store.finalize_enrollment("alice")
+        all_vp = store.get_all()
+        assert "alice" in all_vp
+        assert "stranger" not in all_vp
+
+    def test_orphan_npy_ignored_by_list_users(self, store, temp_dir):
+        import numpy as np
+        np.save(os.path.join(temp_dir, "stranger.npy"), random_unit_vector())
+        store.enroll("alice", random_unit_vector())
+        store.finalize_enrollment("alice")
+        assert store.list_users() == ["alice"]
+
+    def test_delete_removes_users_json_entry(self, store):
+        store.enroll("alice", random_unit_vector())
+        store.finalize_enrollment("alice")
+        store.delete("alice")
+        with pytest.raises(KeyError):
+            store.get_name("alice")
+
+    def test_users_json_persists_across_instances(self, store, temp_dir):
+        store.enroll("alice", random_unit_vector())
+        store.finalize_enrollment("alice")
+        store.register("alice", "Alice Smith")
+        # Fresh store instance pointing at the same dir
+        from core.speaker.enrollment_store import EnrollmentStore as ES
+        fresh = ES(temp_dir)
+        assert fresh.get_name("alice") == "Alice Smith"
+        assert fresh.list_users() == ["alice"]
+
 
 class TestSpeakerVerifier:
     def test_same_embedding_matches(self, store, verifier):
