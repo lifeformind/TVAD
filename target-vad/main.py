@@ -24,7 +24,7 @@ def make_demo_callbacks(verbose: bool):
 
     def on_registered(segment: SpeechSegment, result: VerificationResult, timing: dict):
         console.print(
-            f"[bold green][REGISTERED][/] user={result.matched_user} "
+            f"[bold green][REGISTERED][/] id={result.matched_id} name={result.matched_name} "
             f"| confidence={result.confidence:.2f} "
             f"| duration={timing['segment_duration_ms']:.1f}ms "
             f"| latency={timing['total_overhead_ms']:.0f}ms"

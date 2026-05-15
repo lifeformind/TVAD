@@ -184,7 +184,7 @@ def cmd_test(args):
 
                 if result.is_registered:
                     console.print(
-                        f"[bold green][MATCH][/] user={result.matched_user} "
+                        f"[bold green][MATCH][/] id={result.matched_id} name={result.matched_name} "
                         f"| confidence={result.confidence:.3f} "
                         f"| duration={segment.duration_ms:.0f}ms"
                     )

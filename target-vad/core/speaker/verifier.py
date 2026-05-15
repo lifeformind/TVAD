@@ -20,9 +20,15 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 @dataclass
 class VerificationResult:
-    """Result of speaker verification."""
+    """Result of speaker verification.
+
+    matched_id is the stable storage key; matched_name is the display label
+    looked up via EnrollmentStore.get_name(matched_id). Both are None when
+    is_registered is False.
+    """
     is_registered: bool
-    matched_user: Optional[str]
+    matched_id: Optional[str]
+    matched_name: Optional[str]
     confidence: float
     all_scores: Dict[str, float] = field(default_factory=dict)
 
@@ -43,25 +49,25 @@ class SpeakerVerifier:
         if not voiceprints:
             return VerificationResult(
                 is_registered=False,
-                matched_user=None,
+                matched_id=None,
+                matched_name=None,
                 confidence=0.0,
                 all_scores={},
             )
 
-        scores = {}
-        for username, vp in voiceprints.items():
-            scores[username] = cosine_similarity(embedding, vp)
-
-        best_user = max(scores, key=scores.get)
-        best_score = scores[best_user]
+        scores = {id: cosine_similarity(embedding, vp) for id, vp in voiceprints.items()}
+        best_id = max(scores, key=scores.get)
+        best_score = scores[best_id]
+        is_match = best_score >= self.threshold
 
         return VerificationResult(
-            is_registered=best_score >= self.threshold,
-            matched_user=best_user if best_score >= self.threshold else None,
+            is_registered=is_match,
+            matched_id=best_id if is_match else None,
+            matched_name=self.store.get_name(best_id) if is_match else None,
             confidence=best_score,
             all_scores=scores,
         )
 
-    def update_threshold(self, threshold: float):
+    def update_threshold(self, threshold: float) -> None:
         """Update the verification threshold."""
         self.threshold = threshold

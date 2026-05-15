@@ -53,7 +53,7 @@ class TestPipelineComponents:
         result = verifier.verify(emb)
 
         assert result.is_registered
-        assert result.matched_user == "testuser"
+        assert result.matched_id == "testuser"
         assert result.confidence > 0.99
 
     def test_vad_to_embedding_flow(self, vad):
@@ -89,11 +89,11 @@ class TestPipelineComponents:
 
         # Alice's embedding should match Alice
         result_a = verifier.verify(emb_alice)
-        assert result_a.matched_user == "alice"
+        assert result_a.matched_id == "alice"
 
         # Bob's embedding should match Bob
         result_b = verifier.verify(emb_bob)
-        assert result_b.matched_user == "bob"
+        assert result_b.matched_id == "bob"
 
     def test_unknown_speaker_rejected(self, store):
         """An unenrolled speaker should not be matched."""

@@ -76,7 +76,8 @@ class TargetVADPipeline:
                         "verify_latency_ms": round(verify_ms, 2),
                         "total_overhead_ms": round(embed_ms + verify_ms, 2),
                         "segment_duration_ms": round(segment.duration_ms, 1),
-                        "matched_user": result.matched_user,
+                        "matched_id": result.matched_id,
+                        "matched_name": result.matched_name,
                         "confidence": round(result.confidence, 4),
                     }
 

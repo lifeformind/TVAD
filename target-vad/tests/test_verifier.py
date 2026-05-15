@@ -155,11 +155,23 @@ class TestSpeakerVerifier:
         emb = random_unit_vector()
         store.enroll("alice", emb)
         store.finalize_enrollment("alice")
+        store.register("alice", "Alice Smith")  # explicit display name
 
         result = verifier.verify(emb)
         assert result.is_registered
-        assert result.matched_user == "alice"
+        assert result.matched_id == "alice"
+        assert result.matched_name == "Alice Smith"
         assert result.confidence > 0.99
+
+    def test_match_falls_back_to_id_when_no_display_name(self, store, verifier):
+        emb = random_unit_vector()
+        store.enroll("bob", emb)
+        store.finalize_enrollment("bob")  # auto-registers name == "bob"
+
+        result = verifier.verify(emb)
+        assert result.is_registered
+        assert result.matched_id == "bob"
+        assert result.matched_name == "bob"
 
     def test_orthogonal_embedding_no_match(self, store, verifier):
         emb = np.zeros(192, dtype=np.float32)
@@ -171,33 +183,34 @@ class TestSpeakerVerifier:
         query[1] = 1.0
         result = verifier.verify(query)
         assert not result.is_registered
+        assert result.matched_id is None
+        assert result.matched_name is None
 
     def test_near_threshold(self, store):
-        """Test behavior near the similarity threshold."""
         emb = random_unit_vector()
         store.enroll("alice", emb)
         store.finalize_enrollment("alice")
 
-        # Add a small perturbation (small enough to stay above 0.9 similarity)
         noise = np.random.randn(192).astype(np.float32) * 0.05
         perturbed = emb + noise
         perturbed = perturbed / np.linalg.norm(perturbed)
 
-        # With a moderate threshold, perturbed vector should still match
         low_verifier = SpeakerVerifier(store, threshold=0.75)
         result = low_verifier.verify(perturbed)
         assert result.is_registered
+        assert result.matched_id == "alice"
 
-        # With a very high threshold, should not match
         high_verifier = SpeakerVerifier(store, threshold=0.999)
         result = high_verifier.verify(perturbed)
         assert not result.is_registered
+        assert result.matched_id is None
 
     def test_no_enrolled_users(self, store, verifier):
         emb = random_unit_vector()
         result = verifier.verify(emb)
         assert not result.is_registered
-        assert result.matched_user is None
+        assert result.matched_id is None
+        assert result.matched_name is None
         assert result.all_scores == {}
 
     def test_update_threshold(self, verifier):
