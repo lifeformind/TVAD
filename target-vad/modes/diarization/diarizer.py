@@ -51,7 +51,9 @@ class Diarizer:
         else:
             waveform = torch.from_numpy(audio).float()
 
-        annotation = self._pipeline({"waveform": waveform, "sample_rate": sample_rate})
+        result = self._pipeline({"waveform": waveform, "sample_rate": sample_rate})
+        # pyannote 4.x returns a DiarizeOutput dataclass; 3.x returned an Annotation directly.
+        annotation = getattr(result, "speaker_diarization", result)
 
         clusters: Dict[str, List[Tuple[float, float]]] = {}
         for segment, _, label in annotation.itertracks(yield_label=True):
