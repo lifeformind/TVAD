@@ -19,7 +19,7 @@ unexpected labels (e.g., an engagement-oriented classifier configured in the
 polarity slot).
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from transformers import pipeline as _hf_pipeline
 

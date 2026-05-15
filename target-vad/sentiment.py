@@ -71,11 +71,19 @@ def main(argv: List[str] = None) -> int:
         return EXIT_BAD_INPUT
 
     # Pre-flight: every segment must have a `text` field (transcription pass must have run)
+    # and that field must be a string or None (None / "" produce sentiment: null later;
+    # other types indicate a corrupt or hand-edited JSON).
     for i, seg in enumerate(data["segments"]):
         if "text" not in seg:
             console.print(
                 f"[red]Segment {i} has no [bold]text[/bold] field — transcription pass hasn't run yet.[/]\n"
                 "[dim]Run [bold]transcribe.py[/] first to populate text on every segment.[/]"
+            )
+            return EXIT_BAD_INPUT
+        text_val = seg["text"]
+        if text_val is not None and not isinstance(text_val, str):
+            console.print(
+                f"[red]Segment {i} has [bold]text[/bold] of wrong type: {type(text_val).__name__} (must be string or null).[/]"
             )
             return EXIT_BAD_INPUT
 
@@ -94,26 +102,11 @@ def main(argv: List[str] = None) -> int:
         for seg in data["segments"]:
             seg.pop("sentiment", None)
 
-    # Build classifier; eagerly load models so download/config failures surface here
-    # rather than getting masked by the per-batch exception handler later.
-    classifier = SentimentClassifier(
-        polarity_model=sent_cfg["polarity_model"],
-        emotion_model=sent_cfg["emotion_model"],
-        device=sent_cfg.get("device", "cpu"),
-    )
-    try:
-        classifier.load()
-    except Exception as exc:
-        console.print(
-            f"[red]Failed to load sentiment models:[/] {exc}\n"
-            "[dim]Check your network, HuggingFace cache, and config.sentiment.*.[/]"
-        )
-        return EXIT_MODEL_OR_IO
-
     batch_size = int(sent_cfg.get("batch_size", 16))
 
     # Walk segments and split into three buckets: skip (already classified), null-out (no text),
-    # and queue (text present, needs classification).
+    # and queue (text present, needs classification). Done BEFORE loading the classifier so
+    # the idempotent "all already classified" path doesn't pay the model-load cost.
     segments = data["segments"]
     total = len(segments)
     skipped_count = 0
@@ -131,6 +124,26 @@ def main(argv: List[str] = None) -> int:
             null_count += 1
             continue
         queue_indices.append(i)
+
+    # Only construct and load the classifier if there's actual classification work to do.
+    # Saves ~10s of model load on the idempotent "all already classified" rerun path.
+    classifier = None
+    if queue_indices:
+        # Build classifier; eagerly load models so download/config failures surface here
+        # rather than getting masked by the per-batch exception handler later.
+        classifier = SentimentClassifier(
+            polarity_model=sent_cfg["polarity_model"],
+            emotion_model=sent_cfg["emotion_model"],
+            device=sent_cfg.get("device", "cpu"),
+        )
+        try:
+            classifier.load()
+        except Exception as exc:
+            console.print(
+                f"[red]Failed to load sentiment models:[/] {exc}\n"
+                "[dim]Check your network, HuggingFace cache, and config.sentiment.*.[/]"
+            )
+            return EXIT_MODEL_OR_IO
 
     # Classify in batches with a progress bar
     classified_count = 0

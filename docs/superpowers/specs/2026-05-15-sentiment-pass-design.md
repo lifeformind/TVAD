@@ -123,7 +123,7 @@ No `--audio` (sentiment is text-only). No `--model` overrides at the CLI for now
 
 **Pre-flight validation:** if any segment lacks a `text` field at all (not just `null` or `""`), `sentiment.py` exits 2 with a clear message pointing to `transcribe.py`. Mixed states (some segments have `text`, others don't) are also exit 2 — the JSON should be in a coherent post-transcription state.
 
-The CLI prints a rich progress bar `Classifying [bar] N/M`. On success, prints a summary line: `Classified N segments, skipped M (null/empty text), reused R (already had sentiment) (polarity=..., emotion=...)`.
+The CLI prints a rich progress bar `Classifying [bar] N/M`. On success, prints a summary line with four buckets: `Classified C, skipped S (already had sentiment), nulled N (null/empty text), failed F of T segments (polarity=..., emotion=...)`.
 
 ## Configuration
 
@@ -141,11 +141,12 @@ Any string accepted by `transformers.pipeline()` is valid as a model name: Huggi
 
 ## Model expectations
 
-`SentimentClassifier` uses `transformers.pipeline("text-classification", model=..., return_all_scores=True, device=...)` for both models. This returns a list of `[{label, score}, ...]` per input. The classifier wraps that into the spec's nested shape:
+`SentimentClassifier` uses `transformers.pipeline("text-classification", model=..., top_k=None, device=...)` for both models. This returns a list of `[{label, score}, ...]` per input — `transformers` itself maps the model's raw logits to label strings via the model's bundled `id2label` config during pipeline construction, so by the time output reaches `SentimentClassifier` the labels are already strings (e.g., `"positive"`, `"joy"`).
 
-- Sorts/maps the polarity labels to the canonical `positive`/`neutral`/`negative` keys (handles models that emit `LABEL_0`/`LABEL_1`/`LABEL_2` by reading the model's `id2label` mapping).
-- Sorts/maps the emotion labels to the canonical 7-class keys.
-- If a config model emits labels outside the canonical set (e.g., a future engagement-oriented model), the classifier raises a clear error at first inference: "polarity model emitted label 'X' which is not in the canonical set; use `engagement_model` config in Phase C instead." This prevents silent schema drift.
+The classifier then:
+
+- Validates that each emitted label is in the canonical set (`positive`/`neutral`/`negative` for polarity; the 7-class Ekman set for emotion). Raises `ValueError` with a message naming the offending model and pointing to the config knob if a non-canonical label appears (e.g., a misconfigured model whose `id2label` is missing or wrong, or a model swapped via config into the wrong slot).
+- Builds the nested `{label, score, scores}` block per text, where `label` is the argmax over `scores`.
 
 ## Conflict resolution / edge cases
 
@@ -161,6 +162,13 @@ Any string accepted by `transformers.pipeline()` is valid as a model name: Huggi
 | Per-batch classifier crash | Print `[yellow]warning[/]`, set `sentiment: null` for affected segments, continue. |
 | Whole-pipeline crash mid-run | Atomic write means original JSON is unmodified. User reruns; incremental mode resumes. |
 | JSON missing `segments` field | Exit 2 with schema-version error. |
+
+## Known model calibration notes
+
+These observations came from manual end-to-end validation 2026-05-15 and matter for Phase 3 (user-contribution-metrics) consumers:
+
+- **`j-hartmann/emotion-english-distilroberta-base` fires `disgust` on polite-disagreement text** (e.g., "Sorry, I understand what you're trying to say, but..."). The model's "disgust" calibration is broader than visceral revulsion — it captures contrastive / pushback phrasing. Phase 3 metrics that aggregate per-user "disgust" frequency should be aware that this signal is closer to "registered disagreement" than to actual disgust.
+- Most classroom-discussion text lands as `polarity: neutral` with high confidence (>0.85). The emotion classifier produces more varied signal — useful for surfacing engagement and pushback patterns.
 
 ## Error handling table
 

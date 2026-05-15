@@ -184,6 +184,15 @@ class TestSentimentOrchestration:
         rc = sentiment.main([tmp_workspace["json"], "--config", "config.yaml"])
         assert rc == 2
 
+    def test_non_string_text_type_exits_2(self, tmp_workspace, stub_classifier):
+        """Pre-flight: if any segment has text of wrong type (int, list, etc.), exit 2."""
+        data = _read_json(tmp_workspace["json"])
+        data["segments"][1]["text"] = 123  # not a string and not None
+        with open(tmp_workspace["json"], "w") as f:
+            json.dump(data, f)
+        rc = sentiment.main([tmp_workspace["json"], "--config", "config.yaml"])
+        assert rc == 2
+
     def test_explicit_out_path_does_not_modify_input(self, tmp_workspace, stub_classifier):
         out_path = os.path.join(tmp_workspace["dir"], "out.json")
         rc = sentiment.main([
