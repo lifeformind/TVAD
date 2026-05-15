@@ -47,3 +47,9 @@ transcription:
   initial_prompt_chars: 200   # rolling-context window passed to whisper.transcribe(initial_prompt=...)
   device: "cpu"               # "cpu" on this hardware; "cuda" is reserved for future GPU work
   compute_type: "int8"        # int8 quantization is CPU-optimal; "float32" trades ~2x speed for ~1% WER
+
+sentiment:
+  polarity_model: "cardiffnlp/twitter-roberta-base-sentiment-latest"
+  emotion_model: "j-hartmann/emotion-english-distilroberta-base"
+  device: "cpu"
+  batch_size: 16
