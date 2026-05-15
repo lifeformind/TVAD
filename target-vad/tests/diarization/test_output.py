@@ -88,6 +88,39 @@ class TestWriteJson:
             data = json.load(f)
         assert data["enrolled_users_matched"] == []
 
+    def test_emits_passes_run_when_provided(self, temp_dir, sample_segments):
+        """write_json with passes_run=['diarization'] writes that field at the top level."""
+        import json
+        out = os.path.join(temp_dir, "out.json")
+        write_json(
+            out,
+            audio_file="session.wav",
+            duration_s=2734.51,
+            diarized_at="t",
+            config={},
+            segments=sample_segments,
+            passes_run=["diarization"],
+        )
+        with open(out) as f:
+            data = json.load(f)
+        assert data["passes_run"] == ["diarization"]
+
+    def test_omits_passes_run_when_not_provided(self, temp_dir, sample_segments):
+        """Backward compat: passes_run is optional; existing callers don't pass it."""
+        import json
+        out = os.path.join(temp_dir, "out.json")
+        write_json(
+            out,
+            audio_file="session.wav",
+            duration_s=10.0,
+            diarized_at="t",
+            config={},
+            segments=sample_segments,
+        )
+        with open(out) as f:
+            data = json.load(f)
+        assert "passes_run" not in data
+
 
 class TestWriteRttm:
     def test_basic_rttm_uses_speaker_id(self, temp_dir, sample_segments):

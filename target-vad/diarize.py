@@ -208,6 +208,7 @@ def main(argv: List[str] = None) -> int:
             "introductions_manifest": args.introductions,
         },
         segments=segments,
+        passes_run=["diarization"],
     )
     console.print(f"[green]Wrote[/] {out_path}")
 

@@ -8,7 +8,7 @@ the speaker column (field 8) — RTTM consumers expect stable tokens.
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -46,8 +46,15 @@ def write_json(
     diarized_at: str,
     config: Dict[str, Any],
     segments: List[DiarizationSegment],
+    passes_run: Optional[List[str]] = None,
 ) -> None:
-    """Write the diarization timeline as JSON. Schema per spec."""
+    """Write the diarization timeline as JSON. Schema per spec.
+
+    If `passes_run` is provided, it is emitted as a top-level field. Future
+    analysis passes (transcription, sentiment, ...) read and append to this list
+    on subsequent enrichment runs. Omitted when None to preserve existing-caller
+    behavior.
+    """
     payload = {
         "audio_file": audio_file,
         "duration_s": duration_s,
@@ -59,6 +66,8 @@ def write_json(
             for s in segments
         ],
     }
+    if passes_run is not None:
+        payload["passes_run"] = list(passes_run)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
