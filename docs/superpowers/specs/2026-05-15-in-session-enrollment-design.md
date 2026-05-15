@@ -14,7 +14,7 @@ This unblocks the "first minute is intros" workflow where some speakers in a ses
 
 Two phases, both inside this spec:
 
-- **Phase 1 — persistent enrollment id/name refactor.** Migrate `EnrollmentStore`, `SpeakerVerifier`, `enroll.py`, `main.py`, and the legacy `pipeline/target_vad_pipeline.py` from name-as-key to (id, name) where `id` is the storage key and `name` is the display label. Existing voiceprints on disk auto-migrate on first read.
+- **Phase 1 — persistent enrollment id/name refactor.** Migrate `EnrollmentStore`, `SpeakerVerifier`, `enroll.py`, `main.py`, and the legacy `pipeline/target_vad_pipeline.py` from name-as-key to (id, name) where `id` is the storage key and `name` is the display label. Pre-existing voiceprints not listed in `users.json` are invisible to the new store and must be re-enrolled (legacy data is discardable per user direction 2026-05-15).
 - **Phase 2 — in-session enrollment + diarize.py wiring.** Add a `--introductions` flag to `diarize.py`, a new `modes/diarization/intro_enrollment.py` module, and update `ClusterIdentifier` + the output schema to carry `speaker_id` alongside `speaker`.
 
 The kiosk (`modes/kiosk/*`) does **not** consume `EnrollmentStore` or `SpeakerVerifier` in its runtime path (confirmed by grep of `modes/kiosk/`); no kiosk changes are required.
@@ -299,7 +299,7 @@ Old single-arg `enroll.py siddharth` invocations still work — id and name both
 - Auto-detecting the intro phase (no ASR; user always provides the manifest).
 - Updating kiosk to consume `EnrollmentStore` (it doesn't today; no change needed).
 - Cross-session voiceprint averaging or re-enrollment from intros (intros are session-scoped only; the persistent voiceprint on disk is untouched even when overridden in a session).
-- A dedicated migration CLI for `users.json` — auto-migration on first read is sufficient.
+- A dedicated migration CLI for `users.json` — orphan `.npy` files are invisible to the new store; re-enroll any users you want preserved.
 - Updating Phase-2 ASR (the deferred `transcribe.py` post-processor) to consume the new schema — that work happens when ASR lands and will be in scope of that phase's spec.
 - Changes to the manifest schema beyond the four documented keys (no nested groups, no roles, no times-as-strings). Keep it boring.
 
