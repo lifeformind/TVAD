@@ -39,31 +39,26 @@ voiceprints/
 
 `users.json` is a single JSON object mapping `id` → display `name`. Voiceprint files are still `<id>.npy` (the filename stem IS the id).
 
-### Auto-migration
+### Existing voiceprints are discardable
 
-When `EnrollmentStore` is constructed, it:
+There is no auto-migration. Pre-existing `<id>.npy` files without a `users.json` entry are invisible to the new `EnrollmentStore` — only ids registered in `users.json` are considered enrolled. This decision is deliberate (user confirmed 2026-05-15: "no active usage yet only tests, treat all legacy data as discardable") and keeps `EnrollmentStore` free of filesystem-scanning back-compat logic.
 
-1. Reads `users.json` if present (else starts with `{}`).
-2. Globs `<id>.npy` files in the directory.
-3. For any `<id>.npy` NOT listed in `users.json`, adds the entry `id → id` (display name defaults to the id).
-4. Writes `users.json` back to disk if any entries were added.
-
-Net effect: existing `siddharth.npy` voiceprints become `id="siddharth", name="siddharth"` on first read after upgrade. No user action required, no data loss. The user can hand-edit `users.json` later to set a fancier display name.
+`users.json` is the canonical registry. The current single `siddharth.npy` in the user's `voiceprints/` directory will be invisible after the upgrade and should either be deleted or re-enrolled via `enroll.py siddharth`.
 
 ### `EnrollmentStore` API changes
 
 | Method | Before | After |
 |---|---|---|
 | `enroll(id, embedding)` | (existed) | unchanged — `id` is positional name now |
-| `finalize_enrollment(id)` | (existed) | unchanged |
-| `register(id, name)` | new | adds/updates a `users.json` entry without touching `<id>.npy` |
+| `finalize_enrollment(id)` | (existed) | now also writes a default `users.json` entry `id → id` if one doesn't exist |
+| `register(id, name)` | new | upserts a `users.json` entry without touching `<id>.npy` |
 | `get(id) → np.ndarray` | (existed) | unchanged |
-| `get_name(id) → str` | new | returns display name; falls back to `id` if not registered |
-| `get_all() → Dict[str, np.ndarray]` | (existed) | unchanged — returns id → embedding |
-| `list_users() → List[str]` | (existed) | unchanged — returns sorted list of ids |
-| `delete(id)` | (existed) | now also removes the `users.json` entry |
+| `get_name(id) → str` | new | returns display name from `users.json`; raises `KeyError` if id not registered |
+| `get_all() → Dict[str, np.ndarray]` | (existed) | returns id → embedding **only for ids registered in `users.json`**; orphan `.npy` files are ignored |
+| `list_users() → List[str]` | (existed) | returns sorted list of registered ids (from `users.json`) |
+| `delete(id)` | (existed) | removes both the `<id>.npy` and the `users.json` entry |
 
-The `register` call is what `enroll.py` uses to record the display name when `--name` is passed. Existing tests calling `store.enroll("alice", emb)` keep working: a finalized voiceprint without a corresponding `users.json` entry auto-registers as `name == id` on next read.
+`enroll.py` always calls `store.register(id, name)` after `finalize_enrollment` so display names land in `users.json` immediately. Single-arg `enroll.py siddharth` calls `register("siddharth", "siddharth")` — id and name match. The two-arg form `enroll.py alice_smith --name "Alice"` calls `register("alice_smith", "Alice")`.
 
 ### `SpeakerVerifier` and `VerificationResult` changes
 
@@ -277,8 +272,9 @@ New test files:
 - `tests/test_verifier.py` (update existing):
   - `VerificationResult.matched_id` (not `matched_user`)
   - `register` / `get_name` round-trip
-  - Auto-migration: existing `<id>.npy` files without `users.json` entries get default `name == id`
-  - `users.json` round-trip on enroll/finalize
+  - `get_name` on unregistered id raises `KeyError`
+  - Orphan `<id>.npy` not in `users.json` is ignored by `get_all()` / `list_users()`
+  - `enroll` + `finalize_enrollment` auto-creates a `users.json` entry with `name == id` (so existing single-arg `enroll.py` tests pass unchanged)
 
 - `tests/test_pipeline.py` (update existing):
   - Same migration as `test_verifier.py`
@@ -289,10 +285,12 @@ End-to-end smoke test (manual, not CI): a recording with explicit intros + a kno
 
 ## Migration path for the user
 
+User confirmed 2026-05-15 that no real data is in flight — only the test `siddharth.npy` exists. Migration is therefore trivial:
+
 1. Update code (pull Phase 1 + Phase 2 commits).
-2. Run any command that constructs `EnrollmentStore` — auto-migration kicks in, `users.json` gets written. No manual step.
-3. Optionally hand-edit `voiceprints/users.json` to set nicer display names: `{"siddharth": "Siddharth Jain"}`.
-4. To use in-session enrollment, author a `intros.json` per recording and pass `--introductions intros.json`.
+2. Delete the existing `voiceprints/siddharth.npy` (it'll be invisible to the new store anyway).
+3. Re-enroll: `py -3.14 enroll.py siddharth` (or `... siddharth --name "Siddharth Jain"` to set a display name in one shot).
+4. To use in-session enrollment, author an `intros.json` per recording and pass `--introductions intros.json`.
 
 Old single-arg `enroll.py siddharth` invocations still work — id and name both become `siddharth` (existing behavior preserved exactly).
 
