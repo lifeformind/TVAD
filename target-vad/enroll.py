@@ -119,10 +119,13 @@ def cmd_enroll(args):
     count = store.utterance_count(args.user)
     if count > 0:
         store.finalize_enrollment(args.user)
+        display_name = args.name or args.user
+        store.register(args.user, display_name)
         vp = store.get(args.user)
         console.print(Panel(
             f"[bold green]Enrollment complete![/]\n"
-            f"User: {args.user}\n"
+            f"Id: {args.user}\n"
+            f"Display name: {display_name}\n"
             f"Utterances accepted: {count}/{utterances}\n"
             f"Embedding norm: {np.linalg.norm(vp):.4f}\n"
             f"Embedding mean: {np.mean(vp):.6f}",
@@ -143,7 +146,9 @@ def cmd_list(args):
         console.print("[bold]Enrolled users:[/]")
         for u in users:
             vp = store.get(u)
-            console.print(f"  - {u} (dim={len(vp)}, norm={np.linalg.norm(vp):.4f})")
+            name = store.get_name(u)
+            label = u if name == u else f"{u} ({name})"
+            console.print(f"  - {label} (dim={len(vp)}, norm={np.linalg.norm(vp):.4f})")
 
 
 def cmd_delete(args):
@@ -206,7 +211,8 @@ def main():
 
     # enroll
     p_enroll = sub.add_parser("enroll", help="Enroll a new speaker")
-    p_enroll.add_argument("--user", required=True, help="Username to enroll")
+    p_enroll.add_argument("--user", required=True, help="Storage id for this speaker (e.g. alice_smith)")
+    p_enroll.add_argument("--name", help="Display name (defaults to --user if omitted)")
     p_enroll.add_argument("--utterances", type=int, help="Number of utterances")
 
     # list
