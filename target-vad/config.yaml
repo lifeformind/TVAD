@@ -33,3 +33,10 @@ kiosk:
     window_size: 3
     min_matches: 2
     threshold: 0.50   # tuned for C10 + classroom DSP; raise once non-self baseline measured
+
+diarization:
+  identification_threshold: 0.55
+  default_output_format: "json"   # or "rttm"
+  pyannote_pipeline: "pyannote/speaker-diarization-3.1"
+  hf_token_env_var: "HF_TOKEN"
+  centroid_max_sample_seconds: 30
