@@ -14,7 +14,7 @@ import os
 from typing import Dict, List
 
 
-_BLOCK_LADDER = [(0.0, " "), (0.25, "░"), (0.5, "▒"), (0.75, "▓"), (1.01, "█")]
+_BLOCK_LADDER = [(0.001, " "), (0.25, "░"), (0.5, "▒"), (0.75, "▓"), (1.01, "█")]
 
 
 def _fmt_seconds_compact(s: float) -> str:
