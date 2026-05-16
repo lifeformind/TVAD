@@ -134,3 +134,32 @@ class TestMetricsOrchestration:
             f.write("other:\n  key: value\n")
         rc = metrics.main([tmp_workspace["json"], "--config", tmp_workspace["config"]])
         assert rc == 3
+
+    def test_session_block_breaks_down_enrolled_vs_recurring_unknown(self, tmp_workspace):
+        """JSON with enrolled + recurring-unknown + catchall segments -> session block reports all three."""
+        data = _read(tmp_workspace["json"])
+        # Mutate the fixture: replace bob with a recurring-unknown pyannote id; add a catchall.
+        data["enrolled_users_matched"] = [{"id": "alice", "name": "Alice"}]
+        data["unknown_speakers_observed"] = [
+            {"id": "SPEAKER_00", "segment_count": 1, "talk_seconds": 10.0}
+        ]
+        data["segments"][1]["speaker_id"] = "SPEAKER_00"
+        data["segments"][1]["speaker"] = "SPEAKER_00"
+        # Append a brief catchall segment.
+        data["duration_s"] = 33.0
+        data["segments"].append({
+            "start": 30.0, "end": 33.0,
+            "speaker_id": "unknown", "speaker": "unknown",
+            "text": "uh", "words": [{"start": 30.0, "end": 30.1, "word": "uh", "probability": 0.9}],
+            "sentiment": _sent("neutral", "neutral"),
+        })
+        with open(tmp_workspace["json"], "w") as f:
+            json.dump(data, f)
+
+        rc = metrics.main([tmp_workspace["json"], "--config", tmp_workspace["config"]])
+        assert rc == 0
+        result = _read(tmp_workspace["json"])
+        session = result["contribution_metrics"]["session"]
+        assert session["identified_speakers"] == 1
+        assert session["recurring_unknown_speakers"] == 1
+        assert session["unknown_segments"] == 1

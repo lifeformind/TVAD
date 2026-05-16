@@ -90,6 +90,13 @@ def _build_metrics_block(data: Dict, cfg: Dict) -> Dict:
         "emotion_distribution": sentiment["session"]["emotion_distribution"],
     }
 
+    # Override the 3-way speaker breakdown using authoritative top-level metadata.
+    enrolled_list = data.get("enrolled_users_matched", []) or []
+    recurring_list = data.get("unknown_speakers_observed", []) or []
+    session_block["identified_speakers"] = len(enrolled_list)
+    session_block["recurring_unknown_speakers"] = len(recurring_list)
+    # unknown_segments stays as participation aggregator computed it (count of speaker_id == "unknown" segments).
+
     # Speakers list — order = first-appearance (matches enrolled_users_matched convention).
     seen = set()
     speakers_ordered: List[str] = []
