@@ -196,3 +196,25 @@ class TestAggregateTurnTaking:
         # No prior turn → no gap. Use None to signal "not applicable".
         assert result["per_speaker"]["alice"]["mean_gap_before_seconds"] is None
         assert result["per_speaker"]["alice"]["interruption_count"] == 0
+
+    def test_interrupting_speaker_does_not_contaminate_mean_gap(self):
+        # Alice has two turns: first sets the session start, second interrupts Bob.
+        # Bob has one turn with a clean gap.
+        segments = [
+            _seg(0.0, 5.0, "alice"),
+            _seg(7.0, 15.0, "bob"),          # gap = 2.0 for bob
+            _seg(10.0, 12.0, "alice"),       # interrupts bob (starts before 15.0)
+        ]
+        result = aggregator.aggregate_turn_taking(segments)
+        # Alice has 2 turns. First turn: no gap. Second turn: interrupts.
+        # → no gaps contributed, mean_gap stays None; interruption_count = 1.
+        assert result["per_speaker"]["alice"]["turn_count"] == 2
+        assert result["per_speaker"]["alice"]["mean_gap_before_seconds"] is None
+        assert result["per_speaker"]["alice"]["interruption_count"] == 1
+        # Bob: 1 turn, gap = 2.0, no interruption.
+        assert result["per_speaker"]["bob"]["mean_gap_before_seconds"] == pytest.approx(2.0)
+        assert result["per_speaker"]["bob"]["interruption_count"] == 0
+
+    def test_empty_segments(self):
+        result = aggregator.aggregate_turn_taking([])
+        assert result == {"per_speaker": {}}

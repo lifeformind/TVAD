@@ -177,10 +177,18 @@ def _turns_from_segments(segments: List[Dict]) -> List[Dict]:
 def aggregate_turn_taking(segments: List[Dict]) -> Dict:
     """Compute per-speaker turn count, mean gap before turn, interruption count.
 
-    A turn = a contiguous run of same-speaker segments. Gap and interruption
-    are evaluated against the previous turn (any speaker). First turn in the
-    session has no gap.
+    A turn = a contiguous run of same-speaker segments. Gap and interruption are
+    evaluated against the previous turn (any speaker). First turn in the session
+    has no gap.
+
+    mean_gap_before_seconds is computed only over non-interrupting turns — when a
+    speaker interrupts (their turn starts before the previous turn ends), the
+    event contributes to interruption_count, not the gap mean. This keeps the
+    two metrics orthogonal: interruption_count tells you HOW OFTEN they jump in,
+    mean_gap_before_seconds tells you their PACING on normal turn-take.
     """
+    if not segments:
+        return {"per_speaker": {}}
     turns = _turns_from_segments(segments)
 
     per_speaker: Dict[str, Dict] = {}
@@ -191,9 +199,10 @@ def aggregate_turn_taking(segments: List[Dict]) -> Dict:
         if i > 0:
             prev = turns[i - 1]
             gap = turn["start"] - prev["end"]
-            per_speaker[sid]["_gaps"].append(gap)
             if turn["start"] < prev["end"]:
                 per_speaker[sid]["_interruptions"] += 1
+            else:
+                per_speaker[sid]["_gaps"].append(gap)
 
     result: Dict[str, Dict] = {}
     for sid, accum in per_speaker.items():
