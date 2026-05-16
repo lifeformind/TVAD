@@ -305,3 +305,63 @@ class TestAggregateTimeline:
         ]
         result = aggregator.aggregate_timeline(segments, duration_s=30.0, bucket_seconds=100)
         assert result[0]["per_speaker_emotion_mode"]["alice"] == "neutral"
+
+
+class TestSelectHighlights:
+    def test_longest_segment_always_present_when_segments_exist(self):
+        segments = [
+            _seg(0, 30, "alice", text="long alice", sentiment=_sent("neutral", "neutral")),
+            _seg(30, 35, "bob", text="short bob", sentiment=_sent("neutral", "neutral")),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=35.0, bucket_seconds=300)
+        h = aggregator.select_highlights(segments, timeline, top_k=5, quote_max_chars=100)
+        kinds = [x["kind"] for x in h]
+        assert "longest_segment" in kinds
+        longest = next(x for x in h if x["kind"] == "longest_segment")
+        assert longest["speaker_id"] == "alice"
+        assert longest["value_s"] == pytest.approx(30.0)
+        assert longest["quote"] == "long alice"
+
+    def test_most_positive_skipped_when_no_positive_segments(self):
+        segments = [
+            _seg(0, 10, "alice", text="meh", sentiment=_sent("neutral", "neutral")),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=10.0, bucket_seconds=300)
+        h = aggregator.select_highlights(segments, timeline, top_k=5, quote_max_chars=100)
+        assert all(x["kind"] != "most_positive" for x in h)
+        assert all(x["kind"] != "most_negative" for x in h)
+
+    def test_top_k_caps_highlights(self):
+        segments = [
+            _seg(0, 30, "alice", text="long", sentiment=_sent("positive", "joy", pol_score=0.99)),
+            _seg(30, 35, "bob", text="bad", sentiment=_sent("negative", "anger", pol_score=0.99)),
+            _seg(35, 40, "alice", text="d1", sentiment=_sent("neutral", "disgust")),
+            _seg(40, 45, "alice", text="d2", sentiment=_sent("neutral", "disgust")),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=45.0, bucket_seconds=300)
+        h = aggregator.select_highlights(segments, timeline, top_k=2, quote_max_chars=100)
+        assert len(h) == 2
+
+    def test_quote_truncated_with_ellipsis(self):
+        long_text = "x" * 200
+        segments = [_seg(0, 30, "alice", text=long_text,
+                         sentiment=_sent("positive", "joy", pol_score=0.99))]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=30.0, bucket_seconds=300)
+        h = aggregator.select_highlights(segments, timeline, top_k=5, quote_max_chars=50)
+        for item in h:
+            if "quote" in item:
+                assert len(item["quote"]) <= 53  # 50 + "..."
+                if len(long_text) > 50:
+                    assert item["quote"].endswith("...")
+
+    def test_deterministic_tie_break_earliest_then_alphabetical_sid(self):
+        # Two segments with exact same duration — earliest start wins for longest_segment.
+        segments = [
+            _seg(10, 20, "bob", text="bob"),
+            _seg(0, 10, "alice", text="alice"),
+            _seg(20, 30, "carol", text="carol"),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=30.0, bucket_seconds=300)
+        h = aggregator.select_highlights(segments, timeline, top_k=5, quote_max_chars=100)
+        longest = next(x for x in h if x["kind"] == "longest_segment")
+        assert longest["speaker_id"] == "alice"  # earliest start of equal-duration tie

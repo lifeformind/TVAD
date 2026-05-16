@@ -308,3 +308,156 @@ def aggregate_timeline(
             "per_speaker_emotion_mode": emo_mode,
         })
     return out
+
+
+def _truncate_quote(text: str, max_chars: int) -> str:
+    if text is None:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "..."
+
+
+def select_highlights(
+    segments: List[Dict],
+    timeline: List[Dict],
+    top_k: int,
+    quote_max_chars: int,
+) -> List[Dict]:
+    """Pick up to top_k highlights deterministically.
+
+    Priority order: longest_segment, most_positive, most_negative,
+    high_disgust_window, quietest_window, busiest_window, solo_dominator.
+    Each kind's selection rule is documented in the spec. Ties are broken by
+    earliest start time, then alphabetical speaker_id (stable on rerun).
+    """
+    highlights: List[Dict] = []
+
+    def cap_reached() -> bool:
+        return len(highlights) >= top_k
+
+    # longest_segment
+    if segments and not cap_reached():
+        # Sort: longest duration desc, earliest start asc, alphabetical sid asc.
+        winner = sorted(
+            segments,
+            key=lambda s: (-(s["end"] - s["start"]), s["start"], s["speaker_id"]),
+        )[0]
+        highlights.append({
+            "kind": "longest_segment",
+            "speaker_id": winner["speaker_id"],
+            "start": winner["start"],
+            "end": winner["end"],
+            "value_s": round(winner["end"] - winner["start"], 2),
+            "quote": _truncate_quote(winner.get("text", ""), quote_max_chars),
+        })
+
+    # most_positive — only consider segments whose label IS positive.
+    pos_candidates = [s for s in segments
+                      if (s.get("sentiment") is not None
+                          and s["sentiment"]["polarity"]["label"] == "positive")]
+    if pos_candidates and not cap_reached():
+        winner = sorted(
+            pos_candidates,
+            key=lambda s: (-s["sentiment"]["polarity"]["scores"]["positive"],
+                           s["start"], s["speaker_id"]),
+        )[0]
+        highlights.append({
+            "kind": "most_positive",
+            "speaker_id": winner["speaker_id"],
+            "start": winner["start"],
+            "end": winner["end"],
+            "polarity_score": round(winner["sentiment"]["polarity"]["scores"]["positive"], 2),
+            "quote": _truncate_quote(winner.get("text", ""), quote_max_chars),
+        })
+
+    # most_negative
+    neg_candidates = [s for s in segments
+                      if (s.get("sentiment") is not None
+                          and s["sentiment"]["polarity"]["label"] == "negative")]
+    if neg_candidates and not cap_reached():
+        winner = sorted(
+            neg_candidates,
+            key=lambda s: (-s["sentiment"]["polarity"]["scores"]["negative"],
+                           s["start"], s["speaker_id"]),
+        )[0]
+        highlights.append({
+            "kind": "most_negative",
+            "speaker_id": winner["speaker_id"],
+            "start": winner["start"],
+            "end": winner["end"],
+            "polarity_score": round(winner["sentiment"]["polarity"]["scores"]["negative"], 2),
+            "quote": _truncate_quote(winner.get("text", ""), quote_max_chars),
+        })
+
+    # high_disgust_window — bucket with max disgust-segment count.
+    disgust_counts: List[Dict] = []
+    for b in timeline:
+        # Count disgust-labeled segment-starts in this bucket per speaker.
+        total = 0
+        per_sid: Dict[str, int] = {}
+        for s in segments:
+            if (b["bucket_start_s"] <= s["start"] < b["bucket_end_s"]
+                    and s.get("sentiment") is not None
+                    and s["sentiment"]["emotion"]["label"] == "disgust"):
+                total += 1
+                per_sid[s["speaker_id"]] = per_sid.get(s["speaker_id"], 0) + 1
+        if total > 0:
+            top_sid = sorted(per_sid.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+            disgust_counts.append({"bucket": b, "count": total, "speaker_id": top_sid})
+    if disgust_counts and not cap_reached():
+        winner = sorted(disgust_counts, key=lambda d: (-d["count"], d["bucket"]["bucket_start_s"]))[0]
+        highlights.append({
+            "kind": "high_disgust_window",
+            "bucket_start_s": winner["bucket"]["bucket_start_s"],
+            "bucket_end_s": winner["bucket"]["bucket_end_s"],
+            "speaker_id": winner["speaker_id"],
+            "count": winner["count"],
+        })
+
+    # quietest_window / busiest_window / solo_dominator — only when >= 2 buckets.
+    if len(timeline) >= 2:
+        # Total talk per bucket = sum across all speakers.
+        bucket_totals = [
+            (b, round(sum(b["per_speaker_talk_s"].values()), 2)) for b in timeline
+        ]
+
+        if not cap_reached():
+            winner = sorted(bucket_totals, key=lambda t: (t[1], t[0]["bucket_start_s"]))[0]
+            highlights.append({
+                "kind": "quietest_window",
+                "bucket_start_s": winner[0]["bucket_start_s"],
+                "bucket_end_s": winner[0]["bucket_end_s"],
+                "total_talk_s": winner[1],
+            })
+
+        if not cap_reached():
+            winner = sorted(bucket_totals, key=lambda t: (-t[1], t[0]["bucket_start_s"]))[0]
+            highlights.append({
+                "kind": "busiest_window",
+                "bucket_start_s": winner[0]["bucket_start_s"],
+                "bucket_end_s": winner[0]["bucket_end_s"],
+                "total_talk_s": winner[1],
+            })
+
+        if not cap_reached():
+            for b, total in bucket_totals:
+                if total < 60.0:
+                    continue
+                # Find max-talk speaker in this bucket.
+                top_sid, top_talk = max(
+                    b["per_speaker_talk_s"].items(),
+                    key=lambda kv: (kv[1], kv[0]),
+                )
+                if top_talk / total >= 0.8:
+                    highlights.append({
+                        "kind": "solo_dominator",
+                        "bucket_start_s": b["bucket_start_s"],
+                        "bucket_end_s": b["bucket_end_s"],
+                        "speaker_id": top_sid,
+                        "talk_s": round(top_talk, 2),
+                        "total_talk_s": total,
+                    })
+                    break  # Only the first qualifying bucket.
+
+    return highlights[:top_k]
