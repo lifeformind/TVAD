@@ -38,6 +38,7 @@ class TestWriteJson:
             diarized_at="2026-05-15T10:23:01Z",
             config={"pyannote_pipeline": "pyannote/speaker-diarization-3.1", "identification_threshold": 0.55},
             segments=sample_segments,
+            enrolled_ids={"siddharth"},
         )
         with open(out) as f:
             data = json.load(f)
@@ -60,7 +61,8 @@ class TestWriteJson:
             DiarizationSegment(4.0, 5.0, "alice_jones", "Alice"),
         ]
         out = os.path.join(temp_dir, "out.json")
-        write_json(out, audio_file="a.wav", duration_s=5.0, diarized_at="t", config={}, segments=segments)
+        write_json(out, audio_file="a.wav", duration_s=5.0, diarized_at="t", config={}, segments=segments,
+                   enrolled_ids={"alice_smith", "bob", "alice_jones"})
         with open(out) as f:
             data = json.load(f)
         assert data["enrolled_users_matched"] == [
@@ -71,7 +73,8 @@ class TestWriteJson:
 
     def test_empty_segments_writes_empty_list(self, temp_dir):
         out = os.path.join(temp_dir, "out.json")
-        write_json(out, audio_file="a.wav", duration_s=10.0, diarized_at="t", config={}, segments=[])
+        write_json(out, audio_file="a.wav", duration_s=10.0, diarized_at="t", config={}, segments=[],
+                   enrolled_ids=set())
         with open(out) as f:
             data = json.load(f)
         assert data["segments"] == []
@@ -83,7 +86,8 @@ class TestWriteJson:
             DiarizationSegment(1.0, 2.0, "unknown", "unknown"),
         ]
         out = os.path.join(temp_dir, "out.json")
-        write_json(out, audio_file="a.wav", duration_s=2.0, diarized_at="t", config={}, segments=segments)
+        write_json(out, audio_file="a.wav", duration_s=2.0, diarized_at="t", config={}, segments=segments,
+                   enrolled_ids=set())
         with open(out) as f:
             data = json.load(f)
         assert data["enrolled_users_matched"] == []
@@ -99,6 +103,7 @@ class TestWriteJson:
             diarized_at="t",
             config={},
             segments=sample_segments,
+            enrolled_ids={"siddharth"},
             passes_run=["diarization"],
         )
         with open(out) as f:
@@ -116,10 +121,52 @@ class TestWriteJson:
             diarized_at="t",
             config={},
             segments=sample_segments,
+            enrolled_ids={"siddharth"},
         )
         with open(out) as f:
             data = json.load(f)
         assert "passes_run" not in data
+
+    def test_emits_unknown_speakers_observed(self, temp_dir):
+        """Pyannote-id segments produce an unknown_speakers_observed list with counts."""
+        segments = [
+            DiarizationSegment(0.0, 5.0, "alice", "Alice"),
+            DiarizationSegment(5.0, 10.0, "SPEAKER_00", "SPEAKER_00"),
+            DiarizationSegment(10.0, 13.0, "SPEAKER_00", "SPEAKER_00"),
+            DiarizationSegment(13.0, 15.0, "unknown", "unknown"),
+            DiarizationSegment(15.0, 20.0, "SPEAKER_01", "SPEAKER_01"),
+        ]
+        out = os.path.join(temp_dir, "out.json")
+        write_json(
+            out, audio_file="s.wav", duration_s=20.0,
+            diarized_at="2026-05-16T00:00:00Z",
+            config={}, segments=segments,
+            enrolled_ids={"alice"},
+        )
+        with open(out) as f:
+            data = json.load(f)
+        assert data["enrolled_users_matched"] == [{"id": "alice", "name": "Alice"}]
+        assert data["unknown_speakers_observed"] == [
+            {"id": "SPEAKER_00", "segment_count": 2, "talk_seconds": 8.0},
+            {"id": "SPEAKER_01", "segment_count": 1, "talk_seconds": 5.0},
+        ]
+
+    def test_unknown_speakers_observed_empty_list_when_no_pyannote_ids(self, temp_dir):
+        """No recurring unknowns -> emit empty list, not omit the field."""
+        segments = [
+            DiarizationSegment(0.0, 5.0, "alice", "Alice"),
+            DiarizationSegment(5.0, 7.0, "unknown", "unknown"),
+        ]
+        out = os.path.join(temp_dir, "out.json")
+        write_json(
+            out, audio_file="s.wav", duration_s=7.0,
+            diarized_at="2026-05-16T00:00:00Z",
+            config={}, segments=segments,
+            enrolled_ids={"alice"},
+        )
+        with open(out) as f:
+            data = json.load(f)
+        assert data["unknown_speakers_observed"] == []
 
 
 class TestWriteRttm:

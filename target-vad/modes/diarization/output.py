@@ -25,17 +25,53 @@ class DiarizationSegment:
     speaker: str
 
 
-def _enrolled_users_in_first_appearance_order(segments: List[DiarizationSegment]) -> List[Dict[str, str]]:
-    """Return list of {id, name} objects deduped by id, in first-appearance order."""
+def _enrolled_users_in_first_appearance_order(
+    segments: List[DiarizationSegment],
+    enrolled_ids: set,
+) -> List[Dict[str, str]]:
+    """Return list of {id, name} objects deduped by id, in first-appearance order.
+
+    Only emits speakers whose id is in `enrolled_ids` - filters out both the
+    literal 'unknown' sentinel and pyannote-generated ids like 'SPEAKER_00'
+    that don't correspond to any enrolled voiceprint.
+    """
     seen = set()
     result = []
     for s in segments:
-        if s.speaker_id == "unknown":
+        if s.speaker_id not in enrolled_ids:
             continue
         if s.speaker_id not in seen:
             seen.add(s.speaker_id)
             result.append({"id": s.speaker_id, "name": s.speaker})
     return result
+
+
+def _unknown_speakers_observed_in_first_appearance_order(
+    segments: List[DiarizationSegment],
+    enrolled_ids: set,
+) -> List[Dict[str, Any]]:
+    """Return list of {id, segment_count, talk_seconds} for recurring-unknown speakers.
+
+    A 'recurring unknown' is a speaker_id that is neither the literal 'unknown'
+    sentinel nor in the enrolled_ids set - i.e., a pyannote-generated id that
+    was preserved by the threshold gate in ClusterIdentifier. Ordered by first
+    appearance (earliest segment.start).
+    """
+    counts: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for s in segments:
+        sid = s.speaker_id
+        if sid == "unknown" or sid in enrolled_ids:
+            continue
+        if sid not in counts:
+            counts[sid] = {"id": sid, "segment_count": 0, "talk_seconds": 0.0}
+            order.append(sid)
+        counts[sid]["segment_count"] += 1
+        counts[sid]["talk_seconds"] += s.end - s.start
+    # Round talk_seconds to 2 decimals for stable JSON output.
+    for sid in counts:
+        counts[sid]["talk_seconds"] = round(counts[sid]["talk_seconds"], 2)
+    return [counts[sid] for sid in order]
 
 
 def write_json(
@@ -46,21 +82,25 @@ def write_json(
     diarized_at: str,
     config: Dict[str, Any],
     segments: List[DiarizationSegment],
+    enrolled_ids: set,
     passes_run: Optional[List[str]] = None,
 ) -> None:
     """Write the diarization timeline as JSON. Schema per spec.
 
-    If `passes_run` is provided, it is emitted as a top-level field. Future
-    analysis passes (transcription, sentiment, ...) read and append to this list
-    on subsequent enrichment runs. Omitted when None to preserve existing-caller
-    behavior.
+    `enrolled_ids` is the set of ids that correspond to enrolled voiceprints
+    (persistent or session-scoped). Speakers with ids outside this set and not
+    equal to 'unknown' are treated as recurring unknowns (preserved pyannote
+    cluster ids per the threshold gate in ClusterIdentifier).
+
+    If `passes_run` is provided, it is emitted as a top-level field.
     """
     payload = {
         "audio_file": audio_file,
         "duration_s": duration_s,
         "diarized_at": diarized_at,
         "config": config,
-        "enrolled_users_matched": _enrolled_users_in_first_appearance_order(segments),
+        "enrolled_users_matched": _enrolled_users_in_first_appearance_order(segments, enrolled_ids),
+        "unknown_speakers_observed": _unknown_speakers_observed_in_first_appearance_order(segments, enrolled_ids),
         "segments": [
             {"start": s.start, "end": s.end, "speaker_id": s.speaker_id, "speaker": s.speaker}
             for s in segments
