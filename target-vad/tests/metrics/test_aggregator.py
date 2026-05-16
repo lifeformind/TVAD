@@ -77,4 +77,11 @@ class TestAggregateParticipation:
         assert result["session"]["total_segments"] == 0
         assert result["session"]["total_words"] == 0
         assert result["session"]["unique_speakers"] == 0
+        assert result["session"]["identified_speakers"] == 0
+        assert result["session"]["unknown_segments"] == 0
         assert result["per_speaker"] == {}
+
+    def test_zero_duration_segment_gives_none_wpm(self):
+        segments = [_seg(0.0, 0.0, "alice", words=[{"start": 0, "end": 0, "word": "x", "probability": 0.9}])]
+        result = aggregator.aggregate_participation(segments)
+        assert result["per_speaker"]["alice"]["words_per_minute"] is None
