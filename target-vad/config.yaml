@@ -60,3 +60,9 @@ metrics:
   bucket_seconds: 300         # 5-min activity buckets
   top_k_highlights: 5         # cap on Notable moments items
   quote_max_chars: 100        # quote truncation length in highlights
+
+prosody:
+  pitch_min_hz: 80           # pyin floor - typical human speech floor
+  pitch_max_hz: 400          # pyin ceiling - typical adult speech ceiling
+  frame_length_ms: 25        # standard speech-analysis window
+  hop_length_ms: 10          # standard 60% overlap
