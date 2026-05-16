@@ -184,17 +184,23 @@ def main(argv: List[str] = None) -> int:
             enrollment_store=view,
             threshold=diar_cfg["identification_threshold"],
             max_sample_seconds=diar_cfg["centroid_max_sample_seconds"],
+            unknown_min_segments=diar_cfg.get("unknown_min_segments", 2),
+            unknown_min_seconds=diar_cfg.get("unknown_min_seconds", 10.0),
         )
         labels = identifier.label_clusters(audio, sample_rate=16000, clusters=clusters)
         for cid, matched_id in labels.items():
             if matched_id == "unknown":
                 console.print(f"  [dim]{cid}[/] -> [bold]unknown[/]")
+            elif matched_id == cid:
+                # Threshold passed but no enrollment match - pyannote id preserved.
+                console.print(f"  [dim]{cid}[/] -> [bold]{matched_id}[/] [dim](recurring unknown)[/]")
             else:
                 display = view.get_name(matched_id)
                 console.print(f"  [dim]{cid}[/] -> [bold]{matched_id}[/] ([dim]{display}[/])")
 
     # Build output
     segments = flatten_clusters(clusters, labels, view)
+    enrolled_ids = set(view.get_all().keys())
     out_path = args.out or (args.input + ".diarization.json")
     write_json(
         out_path,
@@ -205,9 +211,12 @@ def main(argv: List[str] = None) -> int:
             "pyannote_pipeline": diar_cfg["pyannote_pipeline"],
             "identification_threshold": diar_cfg["identification_threshold"],
             "intro_override_warn_threshold": diar_cfg["intro_override_warn_threshold"],
+            "unknown_min_segments": diar_cfg.get("unknown_min_segments", 2),
+            "unknown_min_seconds": diar_cfg.get("unknown_min_seconds", 10.0),
             "introductions_manifest": args.introductions,
         },
         segments=segments,
+        enrolled_ids=enrolled_ids,
         passes_run=["diarization"],
     )
     console.print(f"[green]Wrote[/] {out_path}")
