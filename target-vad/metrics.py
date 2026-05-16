@@ -226,8 +226,8 @@ def main(argv: List[str] = None) -> int:
         f"[green]Metrics written:[/] {speakers_n} speakers, {segs_n} segments, "
         f"{words_n} words, {hl_n} highlights."
     )
-    console.print(f"  JSON     → {out_json}")
-    console.print(f"  Markdown → {report_path}")
+    console.print(f"  JSON     -> {out_json}")
+    console.print(f"  Markdown -> {report_path}")
     return EXIT_OK
 
 
