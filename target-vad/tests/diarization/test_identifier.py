@@ -207,3 +207,65 @@ class TestClusterIdentifierErrors:
             threshold=0.55, max_sample_seconds=30,
         )
         assert identifier.label_clusters(make_silence(5.0), SR, {}) == {}
+
+
+class TestClusterIdentifierUnknownThreshold:
+    """Behaviour for the recurring-unknown threshold (spec 2026-05-16)."""
+
+    def test_substantive_unmatched_cluster_gets_pyannote_id(self, fake_embedder, fake_store):
+        """2 segments + 12s total + no enrollment match -> keep cluster_id."""
+        fake_store.get_all.return_value = {"alice": unit_vec(seed=1)}
+        fake_embedder.extract.return_value = unit_vec(seed=99)  # far from alice
+        identifier = ClusterIdentifier(
+            embedder=fake_embedder, enrollment_store=fake_store,
+            threshold=0.55, max_sample_seconds=30,
+            unknown_min_segments=2, unknown_min_seconds=10.0,
+        )
+        audio = make_silence(20.0)
+        clusters = {"SPEAKER_00": [(0.0, 6.0), (10.0, 16.0)]}  # 2 segs, 12s
+        labels = identifier.label_clusters(audio, sample_rate=SR, clusters=clusters)
+        assert labels == {"SPEAKER_00": "SPEAKER_00"}
+
+    def test_brief_unmatched_cluster_collapses_to_unknown(self, fake_embedder, fake_store):
+        """3 segments but 4s total -> 'unknown' (duration gate fails)."""
+        fake_store.get_all.return_value = {"alice": unit_vec(seed=1)}
+        fake_embedder.extract.return_value = unit_vec(seed=99)
+        identifier = ClusterIdentifier(
+            embedder=fake_embedder, enrollment_store=fake_store,
+            threshold=0.55, max_sample_seconds=30,
+            unknown_min_segments=2, unknown_min_seconds=10.0,
+        )
+        audio = make_silence(10.0)
+        clusters = {"SPEAKER_00": [(0.0, 1.5), (3.0, 4.5), (5.0, 6.0)]}  # 3 segs, 4s
+        labels = identifier.label_clusters(audio, sample_rate=SR, clusters=clusters)
+        assert labels == {"SPEAKER_00": "unknown"}
+
+    def test_single_long_unmatched_cluster_collapses_to_unknown(self, fake_embedder, fake_store):
+        """1 segment of 30s -> 'unknown' (segment-count gate fails)."""
+        fake_store.get_all.return_value = {"alice": unit_vec(seed=1)}
+        fake_embedder.extract.return_value = unit_vec(seed=99)
+        identifier = ClusterIdentifier(
+            embedder=fake_embedder, enrollment_store=fake_store,
+            threshold=0.55, max_sample_seconds=30,
+            unknown_min_segments=2, unknown_min_seconds=10.0,
+        )
+        audio = make_silence(35.0)
+        clusters = {"SPEAKER_00": [(0.0, 30.0)]}  # 1 seg, 30s
+        labels = identifier.label_clusters(audio, sample_rate=SR, clusters=clusters)
+        assert labels == {"SPEAKER_00": "unknown"}
+
+    def test_empty_voiceprint_store_still_applies_threshold(self, fake_embedder, fake_store):
+        """No voiceprints + 2 clusters (one substantive, one brief) -> substantive keeps id, brief collapses."""
+        fake_store.get_all.return_value = {}  # empty store
+        identifier = ClusterIdentifier(
+            embedder=fake_embedder, enrollment_store=fake_store,
+            threshold=0.55, max_sample_seconds=30,
+            unknown_min_segments=2, unknown_min_seconds=10.0,
+        )
+        audio = make_silence(20.0)
+        clusters = {
+            "SPEAKER_00": [(0.0, 6.0), (8.0, 14.0)],   # 2 segs, 12s - substantive
+            "SPEAKER_01": [(15.0, 15.5)],               # 1 seg, 0.5s - brief
+        }
+        labels = identifier.label_clusters(audio, sample_rate=SR, clusters=clusters)
+        assert labels == {"SPEAKER_00": "SPEAKER_00", "SPEAKER_01": "unknown"}

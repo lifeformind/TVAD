@@ -32,11 +32,15 @@ class ClusterIdentifier:
         enrollment_store,
         threshold: float = 0.55,
         max_sample_seconds: float = 30.0,
+        unknown_min_segments: int = 2,
+        unknown_min_seconds: float = 10.0,
     ):
         self.embedder = embedder
         self.enrollment_store = enrollment_store
         self.threshold = threshold
         self.max_sample_seconds = max_sample_seconds
+        self.unknown_min_segments = unknown_min_segments
+        self.unknown_min_seconds = unknown_min_seconds
 
     def label_clusters(
         self,
@@ -56,20 +60,33 @@ class ClusterIdentifier:
 
         voiceprints = self.enrollment_store.get_all()
         if not voiceprints:
-            # Nothing to compare against — every cluster is unknown without embedding.
-            return {cid: "unknown" for cid in clusters}
+            # Nothing to compare against - apply threshold per cluster.
+            return {cid: self._threshold_label(cid, segs) for cid, segs in clusters.items()}
 
         labels: Dict[str, str] = {}
         for cluster_id, segments in clusters.items():
             try:
                 cluster_audio = self._extract_cluster_audio(audio, sample_rate, segments)
                 embedding = self.embedder.extract(cluster_audio, sample_rate=sample_rate)
-                labels[cluster_id] = self._best_label(embedding, voiceprints)
-            except Exception as exc:  # pragma: no cover — exercised via mocks
-                logger.warning("Embedding failed for cluster %s: %s — labeling unknown", cluster_id, exc)
-                labels[cluster_id] = "unknown"
+                best = self._best_label(embedding, voiceprints)
+                if best == "unknown":
+                    labels[cluster_id] = self._threshold_label(cluster_id, segments)
+                else:
+                    labels[cluster_id] = best
+            except Exception as exc:  # pragma: no cover - exercised via mocks
+                logger.warning("Embedding failed for cluster %s: %s - applying threshold", cluster_id, exc)
+                labels[cluster_id] = self._threshold_label(cluster_id, segments)
 
         return labels
+
+    def _threshold_label(self, cluster_id: str, segments: list) -> str:
+        """Return cluster_id if the cluster passes the recurrence+substance threshold, else 'unknown'."""
+        if len(segments) < self.unknown_min_segments:
+            return "unknown"
+        total_seconds = sum(end - start for start, end in segments)
+        if total_seconds < self.unknown_min_seconds:
+            return "unknown"
+        return cluster_id
 
     def _extract_cluster_audio(
         self, audio: np.ndarray, sample_rate: int, segments: List[Tuple[float, float]]
