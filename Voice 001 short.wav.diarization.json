@@ -1712,8 +1712,8 @@
       {
         "kind": "longest_segment",
         "speaker_id": "session_speaker_a",
-        "start": 0.13221875,
-        "end": 42.572843750000004,
+        "start": 0.13,
+        "end": 42.57,
         "value_s": 42.44,
         "quote": "The whole idea is that both of them should be able to understand the entire procedure, how the whole..."
       },
@@ -1730,6 +1730,6 @@
     "bucket_seconds": 300,
     "top_k_highlights": 5,
     "quote_max_chars": 100,
-    "analyzed_at": "2026-05-16T07:54:19Z"
+    "analyzed_at": "2026-05-16T08:01:14Z"
   }
 }

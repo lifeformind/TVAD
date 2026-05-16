@@ -346,8 +346,8 @@ def select_highlights(
         highlights.append({
             "kind": "longest_segment",
             "speaker_id": winner["speaker_id"],
-            "start": winner["start"],
-            "end": winner["end"],
+            "start": round(winner["start"], 2),
+            "end": round(winner["end"], 2),
             "value_s": round(winner["end"] - winner["start"], 2),
             "quote": _truncate_quote(winner.get("text", ""), quote_max_chars),
         })
@@ -365,8 +365,8 @@ def select_highlights(
         highlights.append({
             "kind": "most_positive",
             "speaker_id": winner["speaker_id"],
-            "start": winner["start"],
-            "end": winner["end"],
+            "start": round(winner["start"], 2),
+            "end": round(winner["end"], 2),
             "polarity_score": round(winner["sentiment"]["polarity"]["scores"]["positive"], 2),
             "quote": _truncate_quote(winner.get("text", ""), quote_max_chars),
         })
@@ -384,8 +384,8 @@ def select_highlights(
         highlights.append({
             "kind": "most_negative",
             "speaker_id": winner["speaker_id"],
-            "start": winner["start"],
-            "end": winner["end"],
+            "start": round(winner["start"], 2),
+            "end": round(winner["end"], 2),
             "polarity_score": round(winner["sentiment"]["polarity"]["scores"]["negative"], 2),
             "quote": _truncate_quote(winner.get("text", ""), quote_max_chars),
         })

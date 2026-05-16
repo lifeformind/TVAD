@@ -2,7 +2,7 @@
 
 **Duration:** 90.0 s (1 min 30 s) · **Speech:** 84.22 s · **Silence:** 8.76 s
 **Speakers:** 2 (2 identified, 0 unknown) · **Words:** 201 · **Segments:** 9
-**Analyzed:** 2026-05-16T07:54:19Z
+**Analyzed:** 2026-05-16T08:01:14Z
 
 ## Notable moments
 - **Longest contribution** — Speaker A, 42.44 s at 00:00: *"The whole idea is that both of them should be able to understand the entire procedure, how the whole..."*
