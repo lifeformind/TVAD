@@ -1566,7 +1566,8 @@
         "surprise": 0,
         "disgust": 1,
         "neutral": 8
-      }
+      },
+      "recurring_unknown_speakers": 0
     },
     "speakers": [
       {
@@ -1730,6 +1731,6 @@
     "bucket_seconds": 300,
     "top_k_highlights": 5,
     "quote_max_chars": 100,
-    "analyzed_at": "2026-05-16T08:01:14Z"
+    "analyzed_at": "2026-05-16T11:00:50Z"
   }
 }

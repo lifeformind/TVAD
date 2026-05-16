@@ -1,8 +1,8 @@
 # Session Metrics — Voice 001 short.wav
 
 **Duration:** 90.0 s (1 min 30 s) · **Speech:** 84.22 s · **Silence:** 8.76 s
-**Speakers:** 2 (2 identified, 0 unknown) · **Words:** 201 · **Segments:** 9
-**Analyzed:** 2026-05-16T08:01:14Z
+**Speakers:** 2 (2 enrolled, 0 recurring unknown, 0 catchall) · **Words:** 201 · **Segments:** 9
+**Analyzed:** 2026-05-16T11:00:50Z
 
 ## Notable moments
 - **Longest contribution** — Speaker A, 42.44 s at 00:00: *"The whole idea is that both of them should be able to understand the entire procedure, how the whole..."*
