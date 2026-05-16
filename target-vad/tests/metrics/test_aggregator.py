@@ -254,3 +254,54 @@ class TestAggregatePairwise:
         ]
         result = aggregator.aggregate_pairwise(segments)
         assert result == {"alice": {"alice": 0}}
+
+
+class TestAggregateTimeline:
+    def test_single_bucket_session_under_threshold(self):
+        segments = [
+            _seg(0, 50, "alice", sentiment=_sent("neutral", "neutral")),
+            _seg(50, 80, "bob", sentiment=_sent("positive", "joy")),
+        ]
+        result = aggregator.aggregate_timeline(segments, duration_s=90.0, bucket_seconds=300)
+        assert len(result) == 1
+        b = result[0]
+        assert b["bucket_start_s"] == 0
+        assert b["bucket_end_s"] == 300
+        assert b["per_speaker_talk_s"]["alice"] == pytest.approx(50.0)
+        assert b["per_speaker_talk_s"]["bob"] == pytest.approx(30.0)
+        assert b["per_speaker_polarity_mode"]["alice"] == "neutral"
+        assert b["per_speaker_emotion_mode"]["bob"] == "joy"
+
+    def test_segment_straddling_boundary_split_proportionally(self):
+        # Bucket 0-10, bucket 10-20. Segment 5-15 spans both.
+        segments = [
+            _seg(5.0, 15.0, "alice", sentiment=_sent("neutral", "neutral")),
+        ]
+        result = aggregator.aggregate_timeline(segments, duration_s=20.0, bucket_seconds=10)
+        assert len(result) == 2
+        # Talk split 5/5
+        assert result[0]["per_speaker_talk_s"]["alice"] == pytest.approx(5.0)
+        assert result[1]["per_speaker_talk_s"]["alice"] == pytest.approx(5.0)
+        # Mode credited only to bucket containing the start (bucket 0).
+        assert result[0]["per_speaker_polarity_mode"]["alice"] == "neutral"
+        assert result[1]["per_speaker_polarity_mode"] == {}
+
+    def test_empty_bucket_emitted_but_per_speaker_dicts_omit_silent_speakers(self):
+        # 30s session with bucket=10. Alice in 0-10 only.
+        segments = [
+            _seg(0, 10, "alice", sentiment=_sent("neutral", "neutral")),
+        ]
+        result = aggregator.aggregate_timeline(segments, duration_s=30.0, bucket_seconds=10)
+        assert len(result) == 3
+        assert result[1]["per_speaker_talk_s"] == {}
+        assert result[2]["per_speaker_talk_s"] == {}
+
+    def test_mode_picks_argmax_of_label_frequency_in_bucket(self):
+        # Three segments all in bucket 0-100. Alice: 2 neutral, 1 surprise → mode=neutral.
+        segments = [
+            _seg(0, 10, "alice", sentiment=_sent("neutral", "neutral")),
+            _seg(10, 20, "alice", sentiment=_sent("neutral", "neutral")),
+            _seg(20, 30, "alice", sentiment=_sent("neutral", "surprise")),
+        ]
+        result = aggregator.aggregate_timeline(segments, duration_s=30.0, bucket_seconds=100)
+        assert result[0]["per_speaker_emotion_mode"]["alice"] == "neutral"

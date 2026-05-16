@@ -6,6 +6,8 @@ plan's prerequisites) and returns a plain dict. No side effects, no model loads.
 Determinism: identical input -> identical output.
 """
 
+import math
+from collections import Counter
 from statistics import mean, median
 from typing import Dict, List
 
@@ -239,3 +241,68 @@ def aggregate_pairwise(segments: List[Dict]) -> Dict[str, Dict[str, int]]:
         if prev_sid != next_sid:
             matrix[prev_sid][next_sid] += 1
     return matrix
+
+
+def aggregate_timeline(
+    segments: List[Dict],
+    duration_s: float,
+    bucket_seconds: int,
+) -> List[Dict]:
+    """Bucket segments into fixed time windows.
+
+    For each bucket:
+      - per_speaker_talk_s: segment-overlap with bucket, apportioned proportionally
+        for segments straddling boundaries.
+      - per_speaker_polarity_mode / _emotion_mode: most-frequent label among the
+        speaker's segments whose START falls within the bucket. Omitted if no
+        such segments. Tie-broken by alphabetical label (stable on rerun).
+    """
+    n_buckets = max(1, math.ceil(duration_s / bucket_seconds)) if duration_s > 0 else 1
+    buckets: List[Dict] = []
+    for i in range(n_buckets):
+        buckets.append({
+            "bucket_start_s": i * bucket_seconds,
+            "bucket_end_s": (i + 1) * bucket_seconds,
+            "per_speaker_talk_s": {},
+            "_pol_counters": {},
+            "_emo_counters": {},
+        })
+
+    for seg in segments:
+        sid = seg["speaker_id"]
+        # Apportion talk seconds across overlapping buckets.
+        for b in buckets:
+            lo = max(seg["start"], b["bucket_start_s"])
+            hi = min(seg["end"], b["bucket_end_s"])
+            if hi > lo:
+                b["per_speaker_talk_s"][sid] = round(
+                    b["per_speaker_talk_s"].get(sid, 0.0) + (hi - lo), 2
+                )
+
+        # Credit polarity/emotion mode to the bucket containing the start.
+        start_bucket_idx = min(int(seg["start"] // bucket_seconds), n_buckets - 1)
+        b = buckets[start_bucket_idx]
+        sent = seg.get("sentiment")
+        if sent is not None:
+            b["_pol_counters"].setdefault(sid, Counter())[sent["polarity"]["label"]] += 1
+            b["_emo_counters"].setdefault(sid, Counter())[sent["emotion"]["label"]] += 1
+
+    # Materialize modes from counters (stable tie-break: count desc, label asc).
+    out: List[Dict] = []
+    for b in buckets:
+        pol_mode: Dict[str, str] = {}
+        emo_mode: Dict[str, str] = {}
+        for sid, ctr in b["_pol_counters"].items():
+            top_label = sorted(ctr.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+            pol_mode[sid] = top_label
+        for sid, ctr in b["_emo_counters"].items():
+            top_label = sorted(ctr.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+            emo_mode[sid] = top_label
+        out.append({
+            "bucket_start_s": b["bucket_start_s"],
+            "bucket_end_s": b["bucket_end_s"],
+            "per_speaker_talk_s": b["per_speaker_talk_s"],
+            "per_speaker_polarity_mode": pol_mode,
+            "per_speaker_emotion_mode": emo_mode,
+        })
+    return out
