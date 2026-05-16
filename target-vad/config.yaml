@@ -40,6 +40,8 @@ diarization:
   hf_token_env_var: "HF_TOKEN"
   centroid_max_sample_seconds: 30
   intro_override_warn_threshold: 0.30   # warn if intro voiceprint disagrees with same-id persistent voiceprint
+  unknown_min_segments: 2          # minimum segment count for a recurring-unknown cluster to keep its pyannote id
+  unknown_min_seconds: 10.0        # minimum total talk seconds for a recurring-unknown cluster to keep its pyannote id
 
 transcription:
   model: "small"              # preset shortcut or any faster-whisper-compatible model identifier
