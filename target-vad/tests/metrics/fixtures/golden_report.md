@@ -48,4 +48,4 @@ Rows = previous speaker, columns = next speaker. Cell = transition count.
 | Speaker B → | 0 | — |
 
 ---
-_Caveat: 'unknown' segments may represent multiple physical speakers; the diarization layer collapses all unenrolled clusters into one bucket._
+_Caveat: catchall 'unknown' segments may still bundle multiple brief or one-off speakers; substantive recurring voices are surfaced as their own `SPEAKER_NN` rows above._

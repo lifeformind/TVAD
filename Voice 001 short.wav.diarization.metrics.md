@@ -2,7 +2,7 @@
 
 **Duration:** 90.0 s (1 min 30 s) · **Speech:** 84.22 s · **Silence:** 8.76 s
 **Speakers:** 2 (2 enrolled, 0 recurring unknown, 0 catchall) · **Words:** 201 · **Segments:** 9
-**Analyzed:** 2026-05-16T11:00:50Z
+**Analyzed:** 2026-05-16T11:08:35Z
 
 ## Notable moments
 - **Longest contribution** — Speaker A, 42.44 s at 00:00: *"The whole idea is that both of them should be able to understand the entire procedure, how the whole..."*
@@ -48,4 +48,4 @@ Rows = previous speaker, columns = next speaker. Cell = transition count.
 | Speaker B → | 0 | — |
 
 ---
-_Caveat: 'unknown' segments may represent multiple physical speakers; the diarization layer collapses all unenrolled clusters into one bucket._
+_Caveat: catchall 'unknown' segments may still bundle multiple brief or one-off speakers; substantive recurring voices are surfaced as their own `SPEAKER_NN` rows above._
