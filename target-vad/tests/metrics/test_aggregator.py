@@ -85,3 +85,68 @@ class TestAggregateParticipation:
         segments = [_seg(0.0, 0.0, "alice", words=[{"start": 0, "end": 0, "word": "x", "probability": 0.9}])]
         result = aggregator.aggregate_participation(segments)
         assert result["per_speaker"]["alice"]["words_per_minute"] is None
+
+
+def _sent(pol_label, emo_label, pol_score=0.8, emo_score=0.6):
+    """Build a canonical sentiment dict for a segment."""
+    polarities = {"positive", "neutral", "negative"}
+    emotions = {"joy", "sadness", "anger", "fear", "surprise", "disgust", "neutral"}
+    pol_scores = {k: 0.05 for k in polarities}
+    pol_scores[pol_label] = pol_score
+    emo_scores = {k: 0.05 for k in emotions}
+    emo_scores[emo_label] = emo_score
+    return {
+        "polarity": {"label": pol_label, "score": pol_score, "scores": pol_scores},
+        "emotion":  {"label": emo_label, "score": emo_score, "scores": emo_scores},
+    }
+
+
+class TestAggregateSentiment:
+    def test_per_speaker_counts_and_percents(self):
+        segments = [
+            _seg(0, 5, "alice", sentiment=_sent("positive", "joy")),
+            _seg(5, 10, "alice", sentiment=_sent("neutral", "neutral")),
+            _seg(10, 15, "alice", sentiment=_sent("neutral", "neutral")),
+            _seg(15, 20, "alice", sentiment=_sent("neutral", "surprise")),
+            _seg(20, 25, "bob", sentiment=_sent("positive", "joy")),
+        ]
+        result = aggregator.aggregate_sentiment(segments)
+
+        assert set(result.keys()) == {"session", "per_speaker"}
+        sess = result["session"]
+        assert sess["polarity_distribution"] == {"positive": 2, "neutral": 3, "negative": 0}
+        assert sess["emotion_distribution"]["joy"] == 2
+        assert sess["emotion_distribution"]["neutral"] == 2
+        assert sess["emotion_distribution"]["surprise"] == 1
+
+        alice = result["per_speaker"]["alice"]
+        assert alice["polarity"]["counts"] == {"positive": 1, "neutral": 3, "negative": 0}
+        assert alice["polarity"]["percent"] == {"positive": 25.0, "neutral": 75.0, "negative": 0.0}
+        assert alice["emotion"]["counts"]["joy"] == 1
+        assert alice["emotion"]["counts"]["neutral"] == 2
+        assert alice["emotion"]["counts"]["surprise"] == 1
+        # Mean top confidence = avg of pol_score across alice's segments = 0.8
+        assert alice["polarity"]["mean_top_confidence"] == pytest.approx(0.8)
+
+    def test_null_sentiment_skipped_in_denominator(self):
+        segments = [
+            _seg(0, 5, "alice", sentiment=_sent("positive", "joy")),
+            _seg(5, 10, "alice", sentiment=None),
+            _seg(10, 15, "alice", sentiment=None),
+        ]
+        result = aggregator.aggregate_sentiment(segments)
+        alice = result["per_speaker"]["alice"]
+        # Only the 1 non-null segment counts. Percent uses denominator=1, not 3.
+        assert alice["polarity"]["counts"] == {"positive": 1, "neutral": 0, "negative": 0}
+        assert alice["polarity"]["percent"]["positive"] == 100.0
+
+    def test_speaker_with_all_null_sentiment(self):
+        segments = [
+            _seg(0, 5, "alice", sentiment=None),
+            _seg(5, 10, "alice", sentiment=None),
+        ]
+        result = aggregator.aggregate_sentiment(segments)
+        alice = result["per_speaker"]["alice"]
+        assert alice["polarity"]["counts"] == {"positive": 0, "neutral": 0, "negative": 0}
+        assert alice["polarity"]["percent"] == {"positive": 0.0, "neutral": 0.0, "negative": 0.0}
+        assert alice["polarity"]["mean_top_confidence"] is None

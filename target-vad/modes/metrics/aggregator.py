@@ -79,3 +79,76 @@ def aggregate_participation(segments: List[Dict]) -> Dict:
         },
         "per_speaker": per_speaker,
     }
+
+
+_POLARITY_LABELS = ("positive", "neutral", "negative")
+_EMOTION_LABELS = ("joy", "sadness", "anger", "fear", "surprise", "disgust", "neutral")
+
+
+def aggregate_sentiment(segments: List[Dict]) -> Dict:
+    """Compute polarity + emotion distributions, per speaker and session-wide.
+
+    Segments with sentiment: null are skipped (no signal). Percentages use
+    the speaker's classified-segment count as denominator. mean_top_confidence
+    is None for speakers with zero classified segments.
+    """
+    by_speaker: Dict[str, List[Dict]] = {}
+    for seg in segments:
+        by_speaker.setdefault(seg["speaker_id"], []).append(seg)
+
+    sess_pol = {k: 0 for k in _POLARITY_LABELS}
+    sess_emo = {k: 0 for k in _EMOTION_LABELS}
+
+    per_speaker: Dict[str, Dict] = {}
+    for sid, segs in by_speaker.items():
+        pol_counts = {k: 0 for k in _POLARITY_LABELS}
+        emo_counts = {k: 0 for k in _EMOTION_LABELS}
+        pol_top_scores: List[float] = []
+        emo_top_scores: List[float] = []
+
+        for s in segs:
+            sent = s.get("sentiment")
+            if sent is None:
+                continue
+            pol = sent["polarity"]
+            emo = sent["emotion"]
+            pol_counts[pol["label"]] += 1
+            emo_counts[emo["label"]] += 1
+            sess_pol[pol["label"]] += 1
+            sess_emo[emo["label"]] += 1
+            pol_top_scores.append(float(pol["score"]))
+            emo_top_scores.append(float(emo["score"]))
+
+        classified = sum(pol_counts.values())
+        if classified:
+            pol_percent = {k: round(100.0 * pol_counts[k] / classified, 1) for k in _POLARITY_LABELS}
+            emo_total = sum(emo_counts.values())
+            emo_percent = {k: round(100.0 * emo_counts[k] / emo_total, 1) for k in _EMOTION_LABELS}
+            pol_mean = round(mean(pol_top_scores), 2)
+            emo_mean = round(mean(emo_top_scores), 2)
+        else:
+            pol_percent = {k: 0.0 for k in _POLARITY_LABELS}
+            emo_percent = {k: 0.0 for k in _EMOTION_LABELS}
+            pol_mean = None
+            emo_mean = None
+
+        per_speaker[sid] = {
+            "polarity": {
+                "counts": pol_counts,
+                "percent": pol_percent,
+                "mean_top_confidence": pol_mean,
+            },
+            "emotion": {
+                "counts": emo_counts,
+                "percent": emo_percent,
+                "mean_top_confidence": emo_mean,
+            },
+        }
+
+    return {
+        "session": {
+            "polarity_distribution": sess_pol,
+            "emotion_distribution": sess_emo,
+        },
+        "per_speaker": per_speaker,
+    }
