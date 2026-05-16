@@ -256,6 +256,8 @@ def aggregate_timeline(
       - per_speaker_polarity_mode / _emotion_mode: most-frequent label among the
         speaker's segments whose START falls within the bucket. Omitted if no
         such segments. Tie-broken by alphabetical label (stable on rerun).
+        (Start-based, not overlap-based, to avoid double-counting a sentiment
+        signal across bucket boundaries.)
     """
     n_buckets = max(1, math.ceil(duration_s / bucket_seconds)) if duration_s > 0 else 1
     buckets: List[Dict] = []
