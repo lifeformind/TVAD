@@ -445,10 +445,12 @@ def select_highlights(
                 if total < 60.0:
                     continue
                 # Find max-talk speaker in this bucket.
-                top_sid, top_talk = max(
+                # Sort by talk desc, alphabetical sid asc — consistent with other
+                # tie-breaking in this function.
+                top_sid, top_talk = sorted(
                     b["per_speaker_talk_s"].items(),
-                    key=lambda kv: (kv[1], kv[0]),
-                )
+                    key=lambda kv: (-kv[1], kv[0]),
+                )[0]
                 if top_talk / total >= 0.8:
                     highlights.append({
                         "kind": "solo_dominator",
