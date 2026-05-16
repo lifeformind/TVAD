@@ -62,9 +62,13 @@ def render_markdown(metrics: Dict, session_meta: Dict) -> str:
         f"**Speech:** {sess['speech_duration_s']} s · "
         f"**Silence:** {sess['silence_duration_s']} s"
     )
+    catchall = 1 if sess.get("unknown_segments", 0) > 0 else 0
+    recurring_unknown = sess.get("recurring_unknown_speakers", 0)
+    enrolled = sess.get("identified_speakers", 0)
+    speakers_total = enrolled + recurring_unknown + catchall
     lines.append(
-        f"**Speakers:** {sess['unique_speakers']} "
-        f"({sess['identified_speakers']} identified, {sess['unknown_segments']} unknown) · "
+        f"**Speakers:** {speakers_total} "
+        f"({enrolled} enrolled, {recurring_unknown} recurring unknown, {catchall} catchall) · "
         f"**Words:** {sess['total_words']} · **Segments:** {sess['total_segments']}"
     )
     lines.append(f"**Analyzed:** {session_meta.get('analyzed_at', '')}")

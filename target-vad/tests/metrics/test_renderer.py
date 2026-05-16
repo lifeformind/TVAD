@@ -20,6 +20,7 @@ def _full_metrics_block():
             "unique_speakers": 2,
             "identified_speakers": 2,
             "unknown_segments": 0,
+            "recurring_unknown_speakers": 0,
             "polarity_distribution": {"positive": 2, "neutral": 7, "negative": 0},
             "emotion_distribution": {"joy": 1, "neutral": 5, "surprise": 1,
                                      "disgust": 2, "anger": 0, "fear": 0, "sadness": 0},
@@ -137,3 +138,13 @@ class TestRenderer:
         metrics = _full_metrics_block()
         out = renderer.render_markdown(metrics, _session_meta())
         assert "registered disagreement" in out
+
+    def test_header_3way_breakdown(self):
+        """Header reports enrolled / recurring unknown / catchall counts."""
+        metrics_block = _full_metrics_block()
+        metrics_block["session"]["identified_speakers"] = 2
+        metrics_block["session"]["recurring_unknown_speakers"] = 1
+        metrics_block["session"]["unknown_segments"] = 3
+        out = renderer.render_markdown(metrics_block, _session_meta())
+        assert "(2 enrolled, 1 recurring unknown, 1 catchall)" in out
+        assert "**Speakers:** 4 " in out  # 2 + 1 + 1

@@ -1,7 +1,7 @@
 # Session Metrics — fixture.wav
 
 **Duration:** 90.0 s (1 min 30 s) · **Speech:** 78.4 s · **Silence:** 11.6 s
-**Speakers:** 2 (2 identified, 0 unknown) · **Words:** 312 · **Segments:** 9
+**Speakers:** 2 (2 enrolled, 0 recurring unknown, 0 catchall) · **Words:** 312 · **Segments:** 9
 **Analyzed:** 2026-05-16T18:42:01Z
 
 ## Notable moments
