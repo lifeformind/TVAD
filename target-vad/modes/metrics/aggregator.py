@@ -214,3 +214,28 @@ def aggregate_turn_taking(segments: List[Dict]) -> Dict:
         }
 
     return {"per_speaker": result}
+
+
+def aggregate_pairwise(segments: List[Dict]) -> Dict[str, Dict[str, int]]:
+    """Compute the who-follows-whom transition matrix.
+
+    Builds turns first (collapses contiguous same-speaker segments). For each
+    adjacent pair of turns (prev, next), increments matrix[prev_sid][next_sid].
+    The returned matrix is rectangular: every observed speaker is both a row
+    and a column, with self-transitions always 0.
+    """
+    turns = _turns_from_segments(segments)
+    speakers = []
+    seen = set()
+    for t in turns:
+        if t["speaker_id"] not in seen:
+            seen.add(t["speaker_id"])
+            speakers.append(t["speaker_id"])
+
+    matrix: Dict[str, Dict[str, int]] = {a: {b: 0 for b in speakers} for a in speakers}
+    for i in range(1, len(turns)):
+        prev_sid = turns[i - 1]["speaker_id"]
+        next_sid = turns[i]["speaker_id"]
+        if prev_sid != next_sid:
+            matrix[prev_sid][next_sid] += 1
+    return matrix

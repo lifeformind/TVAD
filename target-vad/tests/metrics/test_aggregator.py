@@ -218,3 +218,39 @@ class TestAggregateTurnTaking:
     def test_empty_segments(self):
         result = aggregator.aggregate_turn_taking([])
         assert result == {"per_speaker": {}}
+
+
+class TestAggregatePairwise:
+    def test_who_follows_whom_with_collapsed_turns(self):
+        segments = [
+            _seg(0, 5, "alice"),
+            _seg(5, 10, "alice"),     # same turn as previous
+            _seg(10, 15, "bob"),       # alice → bob
+            _seg(15, 20, "alice"),     # bob → alice
+            _seg(20, 25, "alice"),     # same turn
+            _seg(25, 30, "bob"),       # alice → bob
+        ]
+        result = aggregator.aggregate_pairwise(segments)
+        # Two alice→bob transitions, one bob→alice. Self-loops excluded.
+        assert result["alice"]["bob"] == 2
+        assert result["bob"]["alice"] == 1
+        assert result["alice"]["alice"] == 0
+        assert result["bob"]["bob"] == 0
+
+    def test_unknown_appears_as_row_and_column_when_present(self):
+        segments = [
+            _seg(0, 5, "alice"),
+            _seg(5, 10, "unknown"),
+            _seg(10, 15, "alice"),
+        ]
+        result = aggregator.aggregate_pairwise(segments)
+        assert result["alice"]["unknown"] == 1
+        assert result["unknown"]["alice"] == 1
+
+    def test_single_speaker_matrix_empty_off_diagonal(self):
+        segments = [
+            _seg(0, 5, "alice"),
+            _seg(5, 10, "alice"),
+        ]
+        result = aggregator.aggregate_pairwise(segments)
+        assert result == {"alice": {"alice": 0}}
