@@ -150,3 +150,49 @@ class TestAggregateSentiment:
         assert alice["polarity"]["counts"] == {"positive": 0, "neutral": 0, "negative": 0}
         assert alice["polarity"]["percent"] == {"positive": 0.0, "neutral": 0.0, "negative": 0.0}
         assert alice["polarity"]["mean_top_confidence"] is None
+
+
+class TestAggregateTurnTaking:
+    def test_consecutive_same_speaker_collapses_to_one_turn(self):
+        # Alice: 2 adjacent same-speaker segments -> 1 turn; Bob: 1 turn between.
+        segments = [
+            _seg(0.0, 5.0, "alice"),
+            _seg(5.0, 10.0, "alice"),     # collapses with prior turn
+            _seg(11.0, 15.0, "bob"),       # gap = 1.0
+            _seg(16.0, 20.0, "alice"),     # gap = 1.0
+        ]
+        result = aggregator.aggregate_turn_taking(segments)
+        assert result["per_speaker"]["alice"]["turn_count"] == 2
+        assert result["per_speaker"]["bob"]["turn_count"] == 1
+
+    def test_mean_gap_before_excludes_first_turn(self):
+        segments = [
+            _seg(0.0, 5.0, "alice"),       # first turn — no gap
+            _seg(7.0, 10.0, "bob"),         # gap = 2.0
+            _seg(13.0, 15.0, "alice"),      # gap = 3.0
+            _seg(20.0, 25.0, "alice"),      # same-speaker, same turn (no new gap)
+        ]
+        result = aggregator.aggregate_turn_taking(segments)
+        # Alice has 2 turns; only the second turn (start=13) counts a gap (3.0).
+        assert result["per_speaker"]["alice"]["mean_gap_before_seconds"] == pytest.approx(3.0)
+        # Bob's first and only turn (start=7) counts a gap of 2.0.
+        assert result["per_speaker"]["bob"]["mean_gap_before_seconds"] == pytest.approx(2.0)
+
+    def test_interruption_counted_when_overlap(self):
+        segments = [
+            _seg(0.0, 10.0, "alice"),
+            _seg(8.0, 12.0, "bob"),         # starts before alice ends → interruption
+        ]
+        result = aggregator.aggregate_turn_taking(segments)
+        assert result["per_speaker"]["bob"]["interruption_count"] == 1
+        assert result["per_speaker"]["alice"]["interruption_count"] == 0
+
+    def test_single_turn_speaker_has_no_gap(self):
+        segments = [
+            _seg(0.0, 5.0, "alice"),
+        ]
+        result = aggregator.aggregate_turn_taking(segments)
+        assert result["per_speaker"]["alice"]["turn_count"] == 1
+        # No prior turn → no gap. Use None to signal "not applicable".
+        assert result["per_speaker"]["alice"]["mean_gap_before_seconds"] is None
+        assert result["per_speaker"]["alice"]["interruption_count"] == 0

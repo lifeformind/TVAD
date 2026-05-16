@@ -152,3 +152,56 @@ def aggregate_sentiment(segments: List[Dict]) -> Dict:
         },
         "per_speaker": per_speaker,
     }
+
+
+def _turns_from_segments(segments: List[Dict]) -> List[Dict]:
+    """Collapse contiguous same-speaker segments into turns.
+
+    A turn boundary occurs whenever the speaker_id changes. Returns a list of
+    {speaker_id, start, end} dicts where start is the first segment's start and
+    end is the last segment's end in that run.
+    """
+    turns: List[Dict] = []
+    for seg in segments:
+        if turns and turns[-1]["speaker_id"] == seg["speaker_id"]:
+            turns[-1]["end"] = seg["end"]
+        else:
+            turns.append({
+                "speaker_id": seg["speaker_id"],
+                "start": seg["start"],
+                "end": seg["end"],
+            })
+    return turns
+
+
+def aggregate_turn_taking(segments: List[Dict]) -> Dict:
+    """Compute per-speaker turn count, mean gap before turn, interruption count.
+
+    A turn = a contiguous run of same-speaker segments. Gap and interruption
+    are evaluated against the previous turn (any speaker). First turn in the
+    session has no gap.
+    """
+    turns = _turns_from_segments(segments)
+
+    per_speaker: Dict[str, Dict] = {}
+    for i, turn in enumerate(turns):
+        sid = turn["speaker_id"]
+        per_speaker.setdefault(sid, {"_gaps": [], "_interruptions": 0, "_turn_count": 0})
+        per_speaker[sid]["_turn_count"] += 1
+        if i > 0:
+            prev = turns[i - 1]
+            gap = turn["start"] - prev["end"]
+            per_speaker[sid]["_gaps"].append(gap)
+            if turn["start"] < prev["end"]:
+                per_speaker[sid]["_interruptions"] += 1
+
+    result: Dict[str, Dict] = {}
+    for sid, accum in per_speaker.items():
+        gaps = accum["_gaps"]
+        result[sid] = {
+            "turn_count": accum["_turn_count"],
+            "mean_gap_before_seconds": round(mean(gaps), 2) if gaps else None,
+            "interruption_count": accum["_interruptions"],
+        }
+
+    return {"per_speaker": result}
