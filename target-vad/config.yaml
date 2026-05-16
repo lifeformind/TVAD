@@ -53,3 +53,8 @@ sentiment:
   emotion_model: "j-hartmann/emotion-english-distilroberta-base"
   device: "cpu"
   batch_size: 16
+
+metrics:
+  bucket_seconds: 300         # 5-min activity buckets
+  top_k_highlights: 5         # cap on Notable moments items
+  quote_max_chars: 100        # quote truncation length in highlights
