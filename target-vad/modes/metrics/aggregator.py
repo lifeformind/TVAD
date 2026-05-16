@@ -62,7 +62,7 @@ def aggregate_participation(segments: List[Dict]) -> Dict:
             "talk_percent": round(100.0 * talk / speech_duration_s, 1) if speech_duration_s else 0.0,
             "segment_count": len(segs),
             "word_count": wc,
-            "words_per_minute": (60.0 * wc / talk) if talk else None,
+            "words_per_minute": round(60.0 * wc / talk, 1) if talk else None,
             "mean_segment_seconds": round(mean(durations), 2),
             "median_segment_seconds": round(median(durations), 2),
             "max_segment_seconds": round(max(durations), 2),

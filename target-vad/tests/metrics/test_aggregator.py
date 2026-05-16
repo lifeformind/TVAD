@@ -48,7 +48,7 @@ class TestAggregateParticipation:
         assert alice["talk_percent"] == pytest.approx(80.0)
         assert alice["segment_count"] == 2
         assert alice["word_count"] == 5
-        assert alice["words_per_minute"] == pytest.approx(60 * 5 / 16.0)
+        assert alice["words_per_minute"] == pytest.approx(18.8)
         assert alice["mean_segment_seconds"] == pytest.approx(8.0)
         assert alice["median_segment_seconds"] == pytest.approx(8.0)
         assert alice["max_segment_seconds"] == pytest.approx(10.0)
