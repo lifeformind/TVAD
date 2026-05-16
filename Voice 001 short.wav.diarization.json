@@ -1,0 +1,1735 @@
+{
+  "audio_file": "C:\\repos\\TVAD\\Voice 001 short.wav",
+  "duration_s": 90.0,
+  "diarized_at": "2026-05-15T10:53:03Z",
+  "config": {
+    "pyannote_pipeline": "pyannote/speaker-diarization-3.1",
+    "identification_threshold": 0.55,
+    "intro_override_warn_threshold": 0.3,
+    "introductions_manifest": "C:\\tmp\\smoke-intros.json"
+  },
+  "enrolled_users_matched": [
+    {
+      "id": "session_speaker_a",
+      "name": "Speaker A"
+    },
+    {
+      "id": "session_speaker_b",
+      "name": "Speaker B"
+    }
+  ],
+  "segments": [
+    {
+      "start": 0.13221875,
+      "end": 42.572843750000004,
+      "speaker_id": "session_speaker_a",
+      "speaker": "Speaker A",
+      "text": "The whole idea is that both of them should be able to understand the entire procedure, how the whole shift function together, and the sequence of identifying friend or foe. You turn on the radar system, you should be able then to see all the vessels out there, you turn on the ESM, you should be able to track which are all the communication lines, green or red, basically neutral or potential hostile. If it's potential hostile, it can come from a surveillance ship using the same radar system.",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 1.08,
+          "word": "The",
+          "probability": 0.05818270146846771
+        },
+        {
+          "start": 1.08,
+          "end": 3.58,
+          "word": "whole",
+          "probability": 0.9448350071907043
+        },
+        {
+          "start": 3.58,
+          "end": 4.58,
+          "word": "idea",
+          "probability": 0.9785585403442383
+        },
+        {
+          "start": 4.58,
+          "end": 5.08,
+          "word": "is",
+          "probability": 0.951135516166687
+        },
+        {
+          "start": 5.08,
+          "end": 5.7,
+          "word": "that",
+          "probability": 0.7375953197479248
+        },
+        {
+          "start": 5.7,
+          "end": 6.52,
+          "word": "both",
+          "probability": 0.8811759352684021
+        },
+        {
+          "start": 6.52,
+          "end": 6.72,
+          "word": "of",
+          "probability": 0.9915065169334412
+        },
+        {
+          "start": 6.72,
+          "end": 6.9,
+          "word": "them",
+          "probability": 0.9938254356384277
+        },
+        {
+          "start": 6.9,
+          "end": 7.58,
+          "word": "should",
+          "probability": 0.8057663440704346
+        },
+        {
+          "start": 7.58,
+          "end": 8.04,
+          "word": "be",
+          "probability": 0.9905785918235779
+        },
+        {
+          "start": 8.04,
+          "end": 8.22,
+          "word": "able",
+          "probability": 0.9986717700958252
+        },
+        {
+          "start": 8.22,
+          "end": 8.42,
+          "word": "to",
+          "probability": 0.9933798313140869
+        },
+        {
+          "start": 8.42,
+          "end": 9.32,
+          "word": "understand",
+          "probability": 0.9835500717163086
+        },
+        {
+          "start": 9.32,
+          "end": 9.62,
+          "word": "the",
+          "probability": 0.9603432416915894
+        },
+        {
+          "start": 9.62,
+          "end": 9.98,
+          "word": "entire",
+          "probability": 0.9907804131507874
+        },
+        {
+          "start": 9.98,
+          "end": 10.48,
+          "word": "procedure,",
+          "probability": 0.9726816415786743
+        },
+        {
+          "start": 11.12,
+          "end": 11.4,
+          "word": "how",
+          "probability": 0.9536551237106323
+        },
+        {
+          "start": 11.4,
+          "end": 11.58,
+          "word": "the",
+          "probability": 0.9844538569450378
+        },
+        {
+          "start": 11.58,
+          "end": 11.76,
+          "word": "whole",
+          "probability": 0.9781555533409119
+        },
+        {
+          "start": 11.76,
+          "end": 12.02,
+          "word": "shift",
+          "probability": 0.7020386457443237
+        },
+        {
+          "start": 12.02,
+          "end": 12.38,
+          "word": "function",
+          "probability": 0.45779311656951904
+        },
+        {
+          "start": 12.38,
+          "end": 13.0,
+          "word": "together,",
+          "probability": 0.832649827003479
+        },
+        {
+          "start": 13.52,
+          "end": 14.0,
+          "word": "and",
+          "probability": 0.968755841255188
+        },
+        {
+          "start": 14.0,
+          "end": 14.34,
+          "word": "the",
+          "probability": 0.971524715423584
+        },
+        {
+          "start": 14.34,
+          "end": 14.74,
+          "word": "sequence",
+          "probability": 0.9920074939727783
+        },
+        {
+          "start": 14.74,
+          "end": 15.16,
+          "word": "of",
+          "probability": 0.9940336346626282
+        },
+        {
+          "start": 15.16,
+          "end": 16.06,
+          "word": "identifying",
+          "probability": 0.9918692111968994
+        },
+        {
+          "start": 16.06,
+          "end": 16.88,
+          "word": "friend",
+          "probability": 0.3441932201385498
+        },
+        {
+          "start": 16.88,
+          "end": 17.12,
+          "word": "or",
+          "probability": 0.6863425374031067
+        },
+        {
+          "start": 17.12,
+          "end": 17.72,
+          "word": "foe.",
+          "probability": 0.5805075988173485
+        },
+        {
+          "start": 17.76,
+          "end": 17.94,
+          "word": "You",
+          "probability": 0.5619537830352783
+        },
+        {
+          "start": 17.94,
+          "end": 18.14,
+          "word": "turn",
+          "probability": 0.2727489471435547
+        },
+        {
+          "start": 18.14,
+          "end": 18.38,
+          "word": "on",
+          "probability": 0.9851707816123962
+        },
+        {
+          "start": 18.38,
+          "end": 18.56,
+          "word": "the",
+          "probability": 0.9804506301879883
+        },
+        {
+          "start": 18.56,
+          "end": 18.78,
+          "word": "radar",
+          "probability": 0.1958126723766327
+        },
+        {
+          "start": 18.78,
+          "end": 19.28,
+          "word": "system,",
+          "probability": 0.9812601804733276
+        },
+        {
+          "start": 20.0,
+          "end": 20.24,
+          "word": "you",
+          "probability": 0.9808349013328552
+        },
+        {
+          "start": 20.24,
+          "end": 20.52,
+          "word": "should",
+          "probability": 0.9945074915885925
+        },
+        {
+          "start": 20.52,
+          "end": 20.76,
+          "word": "be",
+          "probability": 0.9942261576652527
+        },
+        {
+          "start": 20.76,
+          "end": 20.98,
+          "word": "able",
+          "probability": 0.998856782913208
+        },
+        {
+          "start": 20.98,
+          "end": 21.22,
+          "word": "then",
+          "probability": 0.6576352715492249
+        },
+        {
+          "start": 21.22,
+          "end": 21.4,
+          "word": "to",
+          "probability": 0.985653817653656
+        },
+        {
+          "start": 21.4,
+          "end": 21.62,
+          "word": "see",
+          "probability": 0.9985318183898926
+        },
+        {
+          "start": 21.62,
+          "end": 22.02,
+          "word": "all",
+          "probability": 0.9931913018226624
+        },
+        {
+          "start": 22.02,
+          "end": 22.18,
+          "word": "the",
+          "probability": 0.9867268800735474
+        },
+        {
+          "start": 22.18,
+          "end": 22.42,
+          "word": "vessels",
+          "probability": 0.3231852948665619
+        },
+        {
+          "start": 22.42,
+          "end": 22.72,
+          "word": "out",
+          "probability": 0.923846960067749
+        },
+        {
+          "start": 22.72,
+          "end": 23.06,
+          "word": "there,",
+          "probability": 0.9962873458862305
+        },
+        {
+          "start": 23.44,
+          "end": 23.62,
+          "word": "you",
+          "probability": 0.9221411943435669
+        },
+        {
+          "start": 23.62,
+          "end": 23.8,
+          "word": "turn",
+          "probability": 0.9800137281417847
+        },
+        {
+          "start": 23.8,
+          "end": 24.0,
+          "word": "on",
+          "probability": 0.9949235320091248
+        },
+        {
+          "start": 24.0,
+          "end": 24.1,
+          "word": "the",
+          "probability": 0.985602617263794
+        },
+        {
+          "start": 24.1,
+          "end": 24.7,
+          "word": "ESM,",
+          "probability": 0.9587928354740143
+        },
+        {
+          "start": 24.88,
+          "end": 25.0,
+          "word": "you",
+          "probability": 0.9723376631736755
+        },
+        {
+          "start": 25.0,
+          "end": 25.1,
+          "word": "should",
+          "probability": 0.9972713589668274
+        },
+        {
+          "start": 25.1,
+          "end": 25.28,
+          "word": "be",
+          "probability": 0.9942699670791626
+        },
+        {
+          "start": 25.28,
+          "end": 25.46,
+          "word": "able",
+          "probability": 0.9974623918533325
+        },
+        {
+          "start": 25.46,
+          "end": 25.64,
+          "word": "to",
+          "probability": 0.9956686496734619
+        },
+        {
+          "start": 25.64,
+          "end": 25.92,
+          "word": "track",
+          "probability": 0.9383261799812317
+        },
+        {
+          "start": 25.92,
+          "end": 26.34,
+          "word": "which",
+          "probability": 0.8081343173980713
+        },
+        {
+          "start": 26.34,
+          "end": 26.48,
+          "word": "are",
+          "probability": 0.8776661157608032
+        },
+        {
+          "start": 26.48,
+          "end": 26.6,
+          "word": "all",
+          "probability": 0.9908753633499146
+        },
+        {
+          "start": 26.6,
+          "end": 26.7,
+          "word": "the",
+          "probability": 0.9843559861183167
+        },
+        {
+          "start": 26.7,
+          "end": 27.24,
+          "word": "communication",
+          "probability": 0.9915235042572021
+        },
+        {
+          "start": 27.24,
+          "end": 27.74,
+          "word": "lines,",
+          "probability": 0.8977546691894531
+        },
+        {
+          "start": 27.74,
+          "end": 29.06,
+          "word": "green",
+          "probability": 0.27021875977516174
+        },
+        {
+          "start": 29.06,
+          "end": 29.62,
+          "word": "or",
+          "probability": 0.8966078162193298
+        },
+        {
+          "start": 29.62,
+          "end": 30.06,
+          "word": "red,",
+          "probability": 0.9892032742500305
+        },
+        {
+          "start": 30.6,
+          "end": 31.32,
+          "word": "basically",
+          "probability": 0.18002699315547943
+        },
+        {
+          "start": 31.32,
+          "end": 32.78,
+          "word": "neutral",
+          "probability": 0.9608083367347717
+        },
+        {
+          "start": 32.78,
+          "end": 33.2,
+          "word": "or",
+          "probability": 0.6723337769508362
+        },
+        {
+          "start": 33.2,
+          "end": 34.24,
+          "word": "potential",
+          "probability": 0.9013999104499817
+        },
+        {
+          "start": 34.24,
+          "end": 34.68,
+          "word": "hostile.",
+          "probability": 0.8105160593986511
+        },
+        {
+          "start": 35.14,
+          "end": 35.26,
+          "word": "If",
+          "probability": 0.522190272808075
+        },
+        {
+          "start": 35.26,
+          "end": 35.38,
+          "word": "it's",
+          "probability": 0.645699679851532
+        },
+        {
+          "start": 35.38,
+          "end": 35.76,
+          "word": "potential",
+          "probability": 0.9369327425956726
+        },
+        {
+          "start": 35.76,
+          "end": 36.26,
+          "word": "hostile,",
+          "probability": 0.9468997120857239
+        },
+        {
+          "start": 36.74,
+          "end": 37.04,
+          "word": "it",
+          "probability": 0.5108372569084167
+        },
+        {
+          "start": 37.04,
+          "end": 37.16,
+          "word": "can",
+          "probability": 0.9721464514732361
+        },
+        {
+          "start": 37.16,
+          "end": 37.44,
+          "word": "come",
+          "probability": 0.9942930936813354
+        },
+        {
+          "start": 37.44,
+          "end": 38.1,
+          "word": "from",
+          "probability": 0.9687373638153076
+        },
+        {
+          "start": 38.1,
+          "end": 38.38,
+          "word": "a",
+          "probability": 0.5978004336357117
+        },
+        {
+          "start": 38.38,
+          "end": 38.64,
+          "word": "surveillance",
+          "probability": 0.12974341213703156
+        },
+        {
+          "start": 38.64,
+          "end": 38.98,
+          "word": "ship",
+          "probability": 0.58905428647995
+        },
+        {
+          "start": 38.98,
+          "end": 39.22,
+          "word": "using",
+          "probability": 0.8769291043281555
+        },
+        {
+          "start": 39.22,
+          "end": 39.44,
+          "word": "the",
+          "probability": 0.9945657253265381
+        },
+        {
+          "start": 39.44,
+          "end": 39.74,
+          "word": "same",
+          "probability": 0.9886847138404846
+        },
+        {
+          "start": 39.74,
+          "end": 40.42,
+          "word": "radar",
+          "probability": 0.9988320469856262
+        },
+        {
+          "start": 40.42,
+          "end": 40.94,
+          "word": "system.",
+          "probability": 0.9570931792259216
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.8435167670249939,
+          "scores": {
+            "neutral": 0.8435167670249939,
+            "positive": 0.11474967002868652,
+            "negative": 0.04173353314399719
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.8920497298240662,
+          "scores": {
+            "neutral": 0.8920497298240662,
+            "disgust": 0.04279601201415062,
+            "anger": 0.038891155272722244,
+            "fear": 0.011102319695055485,
+            "surprise": 0.008989701978862286,
+            "sadness": 0.003875498427078128,
+            "joy": 0.002295611659064889
+          }
+        }
+      }
+    },
+    {
+      "start": 1.00971875,
+      "end": 3.2878437500000004,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "Yes, which is up and down.",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.22,
+          "word": "Yes,",
+          "probability": 0.21505944430828094
+        },
+        {
+          "start": 0.34,
+          "end": 0.62,
+          "word": "which",
+          "probability": 0.041058480739593506
+        },
+        {
+          "start": 0.62,
+          "end": 0.64,
+          "word": "is",
+          "probability": 0.9080326557159424
+        },
+        {
+          "start": 0.64,
+          "end": 0.82,
+          "word": "up",
+          "probability": 0.3616568148136139
+        },
+        {
+          "start": 0.82,
+          "end": 1.04,
+          "word": "and",
+          "probability": 0.2925800681114197
+        },
+        {
+          "start": 1.04,
+          "end": 1.52,
+          "word": "down.",
+          "probability": 0.6483494639396667
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.9017712473869324,
+          "scores": {
+            "neutral": 0.9017712473869324,
+            "positive": 0.06467412412166595,
+            "negative": 0.0335545539855957
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.8467692732810974,
+          "scores": {
+            "neutral": 0.8467692732810974,
+            "surprise": 0.08405312895774841,
+            "disgust": 0.025742167606949806,
+            "fear": 0.019937848672270775,
+            "sadness": 0.011351991444826126,
+            "anger": 0.008755369111895561,
+            "joy": 0.0033902081195265055
+          }
+        }
+      }
+    },
+    {
+      "start": 41.86409375,
+      "end": 48.02346875,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "Sorry, I understand what you're trying to say, but because it seems a bit weird because...",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.18,
+          "word": "Sorry,",
+          "probability": 0.17212340235710144
+        },
+        {
+          "start": 0.36,
+          "end": 0.62,
+          "word": "I",
+          "probability": 0.8625643253326416
+        },
+        {
+          "start": 0.62,
+          "end": 0.9,
+          "word": "understand",
+          "probability": 0.2355806678533554
+        },
+        {
+          "start": 0.9,
+          "end": 1.08,
+          "word": "what",
+          "probability": 0.3962791860103607
+        },
+        {
+          "start": 1.08,
+          "end": 1.38,
+          "word": "you're",
+          "probability": 0.6808080971240997
+        },
+        {
+          "start": 1.38,
+          "end": 1.72,
+          "word": "trying",
+          "probability": 0.9177952408790588
+        },
+        {
+          "start": 1.72,
+          "end": 1.88,
+          "word": "to",
+          "probability": 0.9965435862541199
+        },
+        {
+          "start": 1.88,
+          "end": 2.04,
+          "word": "say,",
+          "probability": 0.9496638774871826
+        },
+        {
+          "start": 2.16,
+          "end": 2.26,
+          "word": "but",
+          "probability": 0.9764150381088257
+        },
+        {
+          "start": 2.26,
+          "end": 2.64,
+          "word": "because",
+          "probability": 0.7557986378669739
+        },
+        {
+          "start": 2.64,
+          "end": 4.02,
+          "word": "it",
+          "probability": 0.17771834135055542
+        },
+        {
+          "start": 4.02,
+          "end": 4.4,
+          "word": "seems",
+          "probability": 0.9942522644996643
+        },
+        {
+          "start": 4.4,
+          "end": 4.62,
+          "word": "a",
+          "probability": 0.828952968120575
+        },
+        {
+          "start": 4.62,
+          "end": 4.76,
+          "word": "bit",
+          "probability": 0.9218246340751648
+        },
+        {
+          "start": 4.76,
+          "end": 5.26,
+          "word": "weird",
+          "probability": 0.9836345911026001
+        },
+        {
+          "start": 5.26,
+          "end": 6.12,
+          "word": "because...",
+          "probability": 0.6736734807491302
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.4967966377735138,
+          "scores": {
+            "neutral": 0.4967966377735138,
+            "negative": 0.477615088224411,
+            "positive": 0.025588279590010643
+          }
+        },
+        "emotion": {
+          "label": "disgust",
+          "score": 0.7098150253295898,
+          "scores": {
+            "disgust": 0.7098150253295898,
+            "neutral": 0.09293200075626373,
+            "sadness": 0.08019198477268219,
+            "fear": 0.05279121920466423,
+            "surprise": 0.040577761828899384,
+            "anger": 0.018849443644285202,
+            "joy": 0.0048426114954054356
+          }
+        }
+      }
+    },
+    {
+      "start": 50.993468750000005,
+      "end": 57.28784375,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "the MPA, so what we do, our own trainer to train on this.",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.24,
+          "word": "the",
+          "probability": 0.14480771124362946
+        },
+        {
+          "start": 0.24,
+          "end": 1.1,
+          "word": "MPA,",
+          "probability": 0.7964254319667816
+        },
+        {
+          "start": 1.94,
+          "end": 2.34,
+          "word": "so",
+          "probability": 0.6055201292037964
+        },
+        {
+          "start": 2.34,
+          "end": 2.74,
+          "word": "what",
+          "probability": 0.9034783840179443
+        },
+        {
+          "start": 2.74,
+          "end": 2.92,
+          "word": "we",
+          "probability": 0.9498518705368042
+        },
+        {
+          "start": 2.92,
+          "end": 3.14,
+          "word": "do,",
+          "probability": 0.9834368228912354
+        },
+        {
+          "start": 3.46,
+          "end": 3.66,
+          "word": "our",
+          "probability": 0.33984464406967163
+        },
+        {
+          "start": 3.66,
+          "end": 4.16,
+          "word": "own",
+          "probability": 0.66031414270401
+        },
+        {
+          "start": 4.16,
+          "end": 4.54,
+          "word": "trainer",
+          "probability": 0.6895855665206909
+        },
+        {
+          "start": 4.54,
+          "end": 4.76,
+          "word": "to",
+          "probability": 0.2803818881511688
+        },
+        {
+          "start": 4.76,
+          "end": 4.98,
+          "word": "train",
+          "probability": 0.6300208568572998
+        },
+        {
+          "start": 4.98,
+          "end": 5.14,
+          "word": "on",
+          "probability": 0.7376942038536072
+        },
+        {
+          "start": 5.14,
+          "end": 5.88,
+          "word": "this.",
+          "probability": 0.5369131565093994
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.9019674062728882,
+          "scores": {
+            "neutral": 0.9019674062728882,
+            "positive": 0.05560312047600746,
+            "negative": 0.04242951422929764
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.9350204467773438,
+          "scores": {
+            "neutral": 0.9350204467773438,
+            "surprise": 0.015232212841510773,
+            "anger": 0.01439964771270752,
+            "sadness": 0.012230546213686466,
+            "disgust": 0.010295234620571136,
+            "fear": 0.008758057840168476,
+            "joy": 0.00406387634575367
+          }
+        }
+      }
+    },
+    {
+      "start": 59.29596875,
+      "end": 64.84784375000001,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "The main guy will be the one responsible talking to.",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.34,
+          "word": "The",
+          "probability": 0.5680719017982483
+        },
+        {
+          "start": 0.34,
+          "end": 1.54,
+          "word": "main",
+          "probability": 0.8935226798057556
+        },
+        {
+          "start": 1.54,
+          "end": 1.98,
+          "word": "guy",
+          "probability": 0.9578985571861267
+        },
+        {
+          "start": 1.98,
+          "end": 3.12,
+          "word": "will",
+          "probability": 0.907414436340332
+        },
+        {
+          "start": 3.12,
+          "end": 3.74,
+          "word": "be",
+          "probability": 0.9766721725463867
+        },
+        {
+          "start": 3.74,
+          "end": 3.94,
+          "word": "the",
+          "probability": 0.9436913132667542
+        },
+        {
+          "start": 3.94,
+          "end": 4.16,
+          "word": "one",
+          "probability": 0.9878657460212708
+        },
+        {
+          "start": 4.16,
+          "end": 4.58,
+          "word": "responsible",
+          "probability": 0.985988199710846
+        },
+        {
+          "start": 4.58,
+          "end": 5.14,
+          "word": "talking",
+          "probability": 0.33222449993816855
+        },
+        {
+          "start": 5.14,
+          "end": 5.38,
+          "word": "to.",
+          "probability": 0.9646136164665222
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.8729394674301147,
+          "scores": {
+            "neutral": 0.8729394674301147,
+            "positive": 0.06393812596797943,
+            "negative": 0.06312242895364761
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.8099940419197083,
+          "scores": {
+            "neutral": 0.8099940419197083,
+            "disgust": 0.14183714985847473,
+            "anger": 0.021580763161182404,
+            "sadness": 0.009801208041608334,
+            "joy": 0.007978059351444244,
+            "surprise": 0.00525236688554287,
+            "fear": 0.0035563053097575903
+          }
+        }
+      }
+    },
+    {
+      "start": 66.38346875,
+      "end": 72.40784375,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "the aircraft guy, okay, right? Then each one of them have another crew to do all the...",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.18,
+          "word": "the",
+          "probability": 0.12367574125528336
+        },
+        {
+          "start": 0.18,
+          "end": 0.58,
+          "word": "aircraft",
+          "probability": 0.9848006963729858
+        },
+        {
+          "start": 0.58,
+          "end": 1.04,
+          "word": "guy,",
+          "probability": 0.039431262761354446
+        },
+        {
+          "start": 1.32,
+          "end": 1.78,
+          "word": "okay,",
+          "probability": 0.28500479459762573
+        },
+        {
+          "start": 1.88,
+          "end": 1.96,
+          "word": "right?",
+          "probability": 0.8213850259780884
+        },
+        {
+          "start": 2.42,
+          "end": 2.62,
+          "word": "Then",
+          "probability": 0.837727427482605
+        },
+        {
+          "start": 2.62,
+          "end": 2.9,
+          "word": "each",
+          "probability": 0.9542040228843689
+        },
+        {
+          "start": 2.9,
+          "end": 3.12,
+          "word": "one",
+          "probability": 0.9849997758865356
+        },
+        {
+          "start": 3.12,
+          "end": 3.24,
+          "word": "of",
+          "probability": 0.9699594378471375
+        },
+        {
+          "start": 3.24,
+          "end": 3.44,
+          "word": "them",
+          "probability": 0.9559832811355591
+        },
+        {
+          "start": 3.44,
+          "end": 3.72,
+          "word": "have",
+          "probability": 0.7596282362937927
+        },
+        {
+          "start": 3.72,
+          "end": 4.1,
+          "word": "another",
+          "probability": 0.9902960658073425
+        },
+        {
+          "start": 4.1,
+          "end": 4.56,
+          "word": "crew",
+          "probability": 0.9944512248039246
+        },
+        {
+          "start": 4.56,
+          "end": 4.84,
+          "word": "to",
+          "probability": 0.9599892497062683
+        },
+        {
+          "start": 4.84,
+          "end": 5.34,
+          "word": "do",
+          "probability": 0.9237525463104248
+        },
+        {
+          "start": 5.34,
+          "end": 5.6,
+          "word": "all",
+          "probability": 0.8727949857711792
+        },
+        {
+          "start": 5.6,
+          "end": 6.0,
+          "word": "the...",
+          "probability": 0.7008347660303116
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.897092342376709,
+          "scores": {
+            "neutral": 0.897092342376709,
+            "positive": 0.06822521984577179,
+            "negative": 0.034682463854551315
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.7937094569206238,
+          "scores": {
+            "neutral": 0.7937094569206238,
+            "disgust": 0.10186988860368729,
+            "anger": 0.0763462632894516,
+            "fear": 0.009467441588640213,
+            "surprise": 0.006277470849454403,
+            "sadness": 0.0062195551581680775,
+            "joy": 0.006109877489507198
+          }
+        }
+      }
+    },
+    {
+      "start": 72.89721875000001,
+      "end": 79.54596875,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "Yes, there are not all those trainer, all those trainer. So when we compress into this system, in that context...",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.26,
+          "word": "Yes,",
+          "probability": 0.4016992747783661
+        },
+        {
+          "start": 0.44,
+          "end": 0.52,
+          "word": "there",
+          "probability": 0.198892280459404
+        },
+        {
+          "start": 0.52,
+          "end": 0.62,
+          "word": "are",
+          "probability": 0.7498734593391418
+        },
+        {
+          "start": 0.62,
+          "end": 0.7,
+          "word": "not",
+          "probability": 0.7646219730377197
+        },
+        {
+          "start": 0.7,
+          "end": 0.92,
+          "word": "all",
+          "probability": 0.9710118174552917
+        },
+        {
+          "start": 0.92,
+          "end": 1.04,
+          "word": "those",
+          "probability": 0.9039180278778076
+        },
+        {
+          "start": 1.04,
+          "end": 1.32,
+          "word": "trainer,",
+          "probability": 0.0005480263014779515
+        },
+        {
+          "start": 1.4,
+          "end": 1.54,
+          "word": "all",
+          "probability": 0.6080285906791687
+        },
+        {
+          "start": 1.54,
+          "end": 1.66,
+          "word": "those",
+          "probability": 0.9830365777015686
+        },
+        {
+          "start": 1.66,
+          "end": 2.0,
+          "word": "trainer.",
+          "probability": 0.7922046581904093
+        },
+        {
+          "start": 2.08,
+          "end": 2.48,
+          "word": "So",
+          "probability": 0.8250337839126587
+        },
+        {
+          "start": 2.48,
+          "end": 2.7,
+          "word": "when",
+          "probability": 0.47115281224250793
+        },
+        {
+          "start": 2.7,
+          "end": 2.9,
+          "word": "we",
+          "probability": 0.9735933542251587
+        },
+        {
+          "start": 2.9,
+          "end": 3.5,
+          "word": "compress",
+          "probability": 0.9140207171440125
+        },
+        {
+          "start": 3.5,
+          "end": 4.0,
+          "word": "into",
+          "probability": 0.15517482161521912
+        },
+        {
+          "start": 4.0,
+          "end": 4.54,
+          "word": "this",
+          "probability": 0.03181927464902401
+        },
+        {
+          "start": 4.54,
+          "end": 5.02,
+          "word": "system,",
+          "probability": 0.9560706615447998
+        },
+        {
+          "start": 5.14,
+          "end": 5.74,
+          "word": "in",
+          "probability": 0.8536262512207031
+        },
+        {
+          "start": 5.74,
+          "end": 5.9,
+          "word": "that",
+          "probability": 0.970928966999054
+        },
+        {
+          "start": 5.9,
+          "end": 6.62,
+          "word": "context...",
+          "probability": 0.5966383218765259
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.7884688973426819,
+          "scores": {
+            "neutral": 0.7884688973426819,
+            "negative": 0.14200527966022491,
+            "positive": 0.06952584534883499
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.8980208039283752,
+          "scores": {
+            "neutral": 0.8980208039283752,
+            "disgust": 0.03542732447385788,
+            "surprise": 0.03117750957608223,
+            "anger": 0.021228061988949776,
+            "sadness": 0.0065483818762004375,
+            "fear": 0.005805554334074259,
+            "joy": 0.0017923165578395128
+          }
+        }
+      }
+    },
+    {
+      "start": 80.20409375,
+      "end": 84.33846875,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "I felt it was more appropriate for this guy to control...",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.22,
+          "word": "I",
+          "probability": 0.8797780275344849
+        },
+        {
+          "start": 0.22,
+          "end": 0.5,
+          "word": "felt",
+          "probability": 0.9555963277816772
+        },
+        {
+          "start": 0.5,
+          "end": 0.74,
+          "word": "it",
+          "probability": 0.9742170572280884
+        },
+        {
+          "start": 0.74,
+          "end": 1.0,
+          "word": "was",
+          "probability": 0.9935234785079956
+        },
+        {
+          "start": 1.0,
+          "end": 1.48,
+          "word": "more",
+          "probability": 0.9912365674972534
+        },
+        {
+          "start": 1.48,
+          "end": 2.04,
+          "word": "appropriate",
+          "probability": 0.9970806241035461
+        },
+        {
+          "start": 2.04,
+          "end": 2.4,
+          "word": "for",
+          "probability": 0.9871325492858887
+        },
+        {
+          "start": 2.4,
+          "end": 2.74,
+          "word": "this",
+          "probability": 0.9793809056282043
+        },
+        {
+          "start": 2.74,
+          "end": 3.04,
+          "word": "guy",
+          "probability": 0.9757421016693115
+        },
+        {
+          "start": 3.04,
+          "end": 3.36,
+          "word": "to",
+          "probability": 0.9821975231170654
+        },
+        {
+          "start": 3.36,
+          "end": 4.1,
+          "word": "control...",
+          "probability": 0.5678369402885437
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.739120364189148,
+          "scores": {
+            "neutral": 0.739120364189148,
+            "negative": 0.16182519495487213,
+            "positive": 0.09905437380075455
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.5813072323799133,
+          "scores": {
+            "neutral": 0.5813072323799133,
+            "disgust": 0.1896253377199173,
+            "joy": 0.14176632463932037,
+            "anger": 0.03802723437547684,
+            "sadness": 0.02467702142894268,
+            "surprise": 0.015306447632610798,
+            "fear": 0.009290462359786034
+          }
+        }
+      }
+    },
+    {
+      "start": 85.28346875000001,
+      "end": 89.97471875000001,
+      "speaker_id": "session_speaker_b",
+      "speaker": "Speaker B",
+      "text": "all the things for the ship and talk to the aircraft and the other guy to control all the...",
+      "words": [
+        {
+          "start": 0.0,
+          "end": 0.24,
+          "word": "all",
+          "probability": 0.40816131234169006
+        },
+        {
+          "start": 0.24,
+          "end": 0.38,
+          "word": "the",
+          "probability": 0.9726545810699463
+        },
+        {
+          "start": 0.38,
+          "end": 0.56,
+          "word": "things",
+          "probability": 0.9854288697242737
+        },
+        {
+          "start": 0.56,
+          "end": 0.8,
+          "word": "for",
+          "probability": 0.9463745355606079
+        },
+        {
+          "start": 0.8,
+          "end": 0.9,
+          "word": "the",
+          "probability": 0.9803322553634644
+        },
+        {
+          "start": 0.9,
+          "end": 1.14,
+          "word": "ship",
+          "probability": 0.8273271918296814
+        },
+        {
+          "start": 1.14,
+          "end": 1.48,
+          "word": "and",
+          "probability": 0.8880502581596375
+        },
+        {
+          "start": 1.48,
+          "end": 1.66,
+          "word": "talk",
+          "probability": 0.6437790989875793
+        },
+        {
+          "start": 1.66,
+          "end": 1.84,
+          "word": "to",
+          "probability": 0.990388810634613
+        },
+        {
+          "start": 1.84,
+          "end": 2.0,
+          "word": "the",
+          "probability": 0.8342893123626709
+        },
+        {
+          "start": 2.0,
+          "end": 2.3,
+          "word": "aircraft",
+          "probability": 0.9983400106430054
+        },
+        {
+          "start": 2.3,
+          "end": 3.16,
+          "word": "and",
+          "probability": 0.6648586988449097
+        },
+        {
+          "start": 3.16,
+          "end": 3.46,
+          "word": "the",
+          "probability": 0.9834251999855042
+        },
+        {
+          "start": 3.46,
+          "end": 3.58,
+          "word": "other",
+          "probability": 0.9921321272850037
+        },
+        {
+          "start": 3.58,
+          "end": 3.84,
+          "word": "guy",
+          "probability": 0.8228332996368408
+        },
+        {
+          "start": 3.84,
+          "end": 4.06,
+          "word": "to",
+          "probability": 0.878291130065918
+        },
+        {
+          "start": 4.06,
+          "end": 4.4,
+          "word": "control",
+          "probability": 0.982699990272522
+        },
+        {
+          "start": 4.4,
+          "end": 4.6,
+          "word": "all",
+          "probability": 0.7603634595870972
+        },
+        {
+          "start": 4.6,
+          "end": 4.66,
+          "word": "the...",
+          "probability": 0.6602230817079544
+        }
+      ],
+      "sentiment": {
+        "polarity": {
+          "label": "neutral",
+          "score": 0.9181074500083923,
+          "scores": {
+            "neutral": 0.9181074500083923,
+            "positive": 0.04183144494891167,
+            "negative": 0.04006103426218033
+          }
+        },
+        "emotion": {
+          "label": "neutral",
+          "score": 0.6934287548065186,
+          "scores": {
+            "neutral": 0.6934287548065186,
+            "surprise": 0.08526647835969925,
+            "anger": 0.06681264936923981,
+            "disgust": 0.05329563841223717,
+            "sadness": 0.05040465667843819,
+            "joy": 0.025424769148230553,
+            "fear": 0.02536706067621708
+          }
+        }
+      }
+    }
+  ],
+  "passes_run": [
+    "diarization",
+    "transcription",
+    "sentiment",
+    "metrics"
+  ],
+  "transcription_config": {
+    "model": "small",
+    "language": "en",
+    "initial_prompt_chars": 200,
+    "compute_type": "int8",
+    "transcribed_at": "2026-05-15T14:30:12Z"
+  },
+  "sentiment_config": {
+    "polarity_model": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+    "emotion_model": "j-hartmann/emotion-english-distilroberta-base",
+    "device": "cpu",
+    "batch_size": 16,
+    "analyzed_at": "2026-05-15T18:33:23Z"
+  },
+  "contribution_metrics": {
+    "session": {
+      "duration_s": 90.0,
+      "speech_duration_s": 84.22,
+      "silence_duration_s": 8.76,
+      "total_segments": 9,
+      "total_words": 201,
+      "unique_speakers": 2,
+      "identified_speakers": 2,
+      "unknown_segments": 0,
+      "polarity_distribution": {
+        "positive": 0,
+        "neutral": 9,
+        "negative": 0
+      },
+      "emotion_distribution": {
+        "joy": 0,
+        "sadness": 0,
+        "anger": 0,
+        "fear": 0,
+        "surprise": 0,
+        "disgust": 1,
+        "neutral": 8
+      }
+    },
+    "speakers": [
+      {
+        "speaker_id": "session_speaker_a",
+        "speaker": "Speaker A",
+        "participation": {
+          "talk_seconds": 42.44,
+          "talk_percent": 50.4,
+          "segment_count": 1,
+          "word_count": 89,
+          "words_per_minute": 125.8,
+          "mean_segment_seconds": 42.44,
+          "median_segment_seconds": 42.44,
+          "max_segment_seconds": 42.44
+        },
+        "sentiment": {
+          "polarity": {
+            "counts": {
+              "positive": 0,
+              "neutral": 1,
+              "negative": 0
+            },
+            "percent": {
+              "positive": 0.0,
+              "neutral": 100.0,
+              "negative": 0.0
+            },
+            "mean_top_confidence": 0.84
+          },
+          "emotion": {
+            "counts": {
+              "joy": 0,
+              "sadness": 0,
+              "anger": 0,
+              "fear": 0,
+              "surprise": 0,
+              "disgust": 0,
+              "neutral": 1
+            },
+            "percent": {
+              "joy": 0.0,
+              "sadness": 0.0,
+              "anger": 0.0,
+              "fear": 0.0,
+              "surprise": 0.0,
+              "disgust": 0.0,
+              "neutral": 100.0
+            },
+            "mean_top_confidence": 0.89
+          }
+        },
+        "turn_taking": {
+          "turn_count": 1,
+          "mean_gap_before_seconds": null,
+          "interruption_count": 0
+        }
+      },
+      {
+        "speaker_id": "session_speaker_b",
+        "speaker": "Speaker B",
+        "participation": {
+          "talk_seconds": 41.78,
+          "talk_percent": 49.6,
+          "segment_count": 8,
+          "word_count": 112,
+          "words_per_minute": 160.8,
+          "mean_segment_seconds": 5.22,
+          "median_segment_seconds": 5.79,
+          "max_segment_seconds": 6.65
+        },
+        "sentiment": {
+          "polarity": {
+            "counts": {
+              "positive": 0,
+              "neutral": 8,
+              "negative": 0
+            },
+            "percent": {
+              "positive": 0.0,
+              "neutral": 100.0,
+              "negative": 0.0
+            },
+            "mean_top_confidence": 0.81
+          },
+          "emotion": {
+            "counts": {
+              "joy": 0,
+              "sadness": 0,
+              "anger": 0,
+              "fear": 0,
+              "surprise": 0,
+              "disgust": 1,
+              "neutral": 7
+            },
+            "percent": {
+              "joy": 0.0,
+              "sadness": 0.0,
+              "anger": 0.0,
+              "fear": 0.0,
+              "surprise": 0.0,
+              "disgust": 12.5,
+              "neutral": 87.5
+            },
+            "mean_top_confidence": 0.78
+          }
+        },
+        "turn_taking": {
+          "turn_count": 1,
+          "mean_gap_before_seconds": null,
+          "interruption_count": 1
+        }
+      }
+    ],
+    "pairwise_followers": {
+      "session_speaker_a": {
+        "session_speaker_a": 0,
+        "session_speaker_b": 1
+      },
+      "session_speaker_b": {
+        "session_speaker_a": 0,
+        "session_speaker_b": 0
+      }
+    },
+    "timeline": [
+      {
+        "bucket_start_s": 0,
+        "bucket_end_s": 300,
+        "per_speaker_talk_s": {
+          "session_speaker_a": 42.44,
+          "session_speaker_b": 41.77
+        },
+        "per_speaker_polarity_mode": {
+          "session_speaker_a": "neutral",
+          "session_speaker_b": "neutral"
+        },
+        "per_speaker_emotion_mode": {
+          "session_speaker_a": "neutral",
+          "session_speaker_b": "neutral"
+        }
+      }
+    ],
+    "highlights": [
+      {
+        "kind": "longest_segment",
+        "speaker_id": "session_speaker_a",
+        "start": 0.13221875,
+        "end": 42.572843750000004,
+        "value_s": 42.44,
+        "quote": "The whole idea is that both of them should be able to understand the entire procedure, how the whole..."
+      },
+      {
+        "kind": "high_disgust_window",
+        "bucket_start_s": 0,
+        "bucket_end_s": 300,
+        "speaker_id": "session_speaker_b",
+        "count": 1
+      }
+    ]
+  },
+  "metrics_config": {
+    "bucket_seconds": 300,
+    "top_k_highlights": 5,
+    "quote_max_chars": 100,
+    "analyzed_at": "2026-05-16T07:54:19Z"
+  }
+}
