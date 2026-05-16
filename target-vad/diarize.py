@@ -8,8 +8,6 @@ import os
 import sys
 from typing import List
 
-import numpy as np
-import soundfile as sf
 import yaml
 from rich.console import Console
 
@@ -22,6 +20,7 @@ from modes.diarization.intro_enrollment import (
     SessionEnrollmentView,
     enroll_from_intros,
 )
+from core.audio.load import load_audio_as_mono16k
 from modes.diarization.manifest import load_manifest
 from modes.diarization.output import DiarizationSegment, write_json, write_rttm
 
@@ -35,19 +34,6 @@ EXIT_CONFIG_OR_MODEL = 3
 def load_config(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
-
-
-def load_audio_as_mono16k(path: str) -> np.ndarray:
-    """Read a WAV file and return mono float32 at 16 kHz."""
-    audio, sr = sf.read(path, dtype="float32", always_2d=False)
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
-    if sr != 16000:
-        from scipy.signal import resample_poly
-        from math import gcd
-        g = gcd(sr, 16000)
-        audio = resample_poly(audio, up=16000 // g, down=sr // g).astype(np.float32)
-    return audio.astype(np.float32, copy=False)
 
 
 def flatten_clusters(

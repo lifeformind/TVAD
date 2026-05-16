@@ -17,12 +17,11 @@ import sys
 import tempfile
 from typing import List
 
-import numpy as np
-import soundfile as sf
 import yaml
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, MofNCompleteColumn
 
+from core.audio.load import load_audio_as_mono16k
 from modes.transcription.rolling_context import RollingContext
 from modes.transcription.whisper_runner import WhisperRunner
 
@@ -37,19 +36,6 @@ EXIT_MODEL_OR_IO = 3
 def load_config(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
-
-
-def load_audio_as_mono16k(path: str) -> np.ndarray:
-    """Read a WAV file as mono float32 at 16 kHz. Reused contract from diarize.py."""
-    audio, sr = sf.read(path, dtype="float32", always_2d=False)
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
-    if sr != 16000:
-        from scipy.signal import resample_poly
-        from math import gcd
-        g = gcd(sr, 16000)
-        audio = resample_poly(audio, up=16000 // g, down=sr // g).astype(np.float32)
-    return audio.astype(np.float32, copy=False)
 
 
 def _atomic_write_json(path: str, data: dict) -> None:
