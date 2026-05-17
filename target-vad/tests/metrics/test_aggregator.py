@@ -365,3 +365,111 @@ class TestSelectHighlights:
         h = aggregator.select_highlights(segments, timeline, top_k=5, quote_max_chars=100)
         longest = next(x for x in h if x["kind"] == "longest_segment")
         assert longest["speaker_id"] == "alice"  # earliest start of equal-duration tie
+
+    # ---------- high_disgust_window tests ----------
+
+    def test_high_disgust_window_fires_on_disgust_bucket(self):
+        segments = [
+            _seg(0, 5, "alice", text="ugh", sentiment=_sent("neutral", "disgust")),
+            _seg(5, 10, "alice", text="meh", sentiment=_sent("neutral", "disgust")),
+            _seg(15, 20, "bob", text="ok", sentiment=_sent("neutral", "neutral")),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=25.0, bucket_seconds=10)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        disgust_h = next((x for x in h if x["kind"] == "high_disgust_window"), None)
+        assert disgust_h is not None
+        # Both disgust segments fall in bucket [0, 10), so that's the highlighted window.
+        assert disgust_h["bucket_start_s"] == 0
+        assert disgust_h["bucket_end_s"] == 10
+        assert disgust_h["speaker_id"] == "alice"
+        assert disgust_h["count"] == 2
+
+    def test_high_disgust_window_skipped_when_no_disgust(self):
+        segments = [
+            _seg(0, 5, "alice", text="ok", sentiment=_sent("neutral", "neutral")),
+            _seg(5, 15, "alice", text="cool", sentiment=_sent("positive", "joy")),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=20.0, bucket_seconds=10)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        assert all(x["kind"] != "high_disgust_window" for x in h)
+
+    # ---------- quietest_window tests ----------
+
+    def test_quietest_window_picks_min_talk_bucket(self):
+        # Bucket [0, 10): 8s talk total. Bucket [10, 20): 2s talk total. Bucket [20, 30): empty.
+        segments = [
+            _seg(0, 8, "alice", text="lots"),
+            _seg(11, 13, "alice", text="brief"),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=30.0, bucket_seconds=10)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        quiet_h = next((x for x in h if x["kind"] == "quietest_window"), None)
+        assert quiet_h is not None
+        # Bucket [20, 30) has 0 talk — the quietest.
+        assert quiet_h["bucket_start_s"] == 20
+        assert quiet_h["bucket_end_s"] == 30
+        assert quiet_h["total_talk_s"] == pytest.approx(0.0)
+
+    def test_quietest_window_skipped_when_only_one_bucket(self):
+        segments = [
+            _seg(0, 5, "alice", text="x"),
+        ]
+        # 8s session with bucket=300 -> 1 bucket -> quietest skipped.
+        timeline = aggregator.aggregate_timeline(segments, duration_s=8.0, bucket_seconds=300)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        assert all(x["kind"] != "quietest_window" for x in h)
+
+    # ---------- busiest_window tests ----------
+
+    def test_busiest_window_picks_max_talk_bucket(self):
+        segments = [
+            _seg(0, 2, "alice", text="brief"),
+            _seg(10, 18, "alice", text="lots"),
+            _seg(22, 23, "alice", text="x"),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=30.0, bucket_seconds=10)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        busy_h = next((x for x in h if x["kind"] == "busiest_window"), None)
+        assert busy_h is not None
+        # Bucket [10, 20) has 8s talk — the most.
+        assert busy_h["bucket_start_s"] == 10
+        assert busy_h["bucket_end_s"] == 20
+        assert busy_h["total_talk_s"] == pytest.approx(8.0)
+
+    def test_busiest_window_skipped_when_only_one_bucket(self):
+        segments = [
+            _seg(0, 5, "alice", text="x"),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=8.0, bucket_seconds=300)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        assert all(x["kind"] != "busiest_window" for x in h)
+
+    # ---------- solo_dominator tests ----------
+
+    def test_solo_dominator_fires_on_80_percent_60s_bucket(self):
+        # Bucket [0, 100): Alice talks 70s, Bob talks 5s. 70/75 = 93.3%, total = 75s.
+        # Both thresholds met (>=80% AND >=60s total).
+        segments = [
+            _seg(0, 70, "alice", text="long"),
+            _seg(70, 75, "bob", text="brief"),
+            _seg(110, 115, "alice", text="later"),  # in bucket [100, 200)
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=200.0, bucket_seconds=100)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        solo_h = next((x for x in h if x["kind"] == "solo_dominator"), None)
+        assert solo_h is not None
+        assert solo_h["bucket_start_s"] == 0
+        assert solo_h["bucket_end_s"] == 100
+        assert solo_h["speaker_id"] == "alice"
+        assert solo_h["talk_s"] == pytest.approx(70.0)
+        assert solo_h["total_talk_s"] == pytest.approx(75.0)
+
+    def test_solo_dominator_skipped_when_below_threshold(self):
+        # Bucket [0, 100): Alice 50% / Bob 50%. Total 60s but neither >= 80%.
+        segments = [
+            _seg(0, 30, "alice", text="x"),
+            _seg(30, 60, "bob", text="y"),
+        ]
+        timeline = aggregator.aggregate_timeline(segments, duration_s=200.0, bucket_seconds=100)
+        h = aggregator.select_highlights(segments, timeline, top_k=10, quote_max_chars=100)
+        assert all(x["kind"] != "solo_dominator" for x in h)
