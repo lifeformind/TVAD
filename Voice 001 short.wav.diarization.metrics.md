@@ -2,7 +2,7 @@
 
 **Duration:** 90.0 s (1 min 30 s) · **Speech:** 84.22 s · **Silence:** 8.76 s
 **Speakers:** 2 (2 enrolled, 0 recurring unknown, 0 catchall) · **Words:** 201 · **Segments:** 9
-**Analyzed:** 2026-05-16T11:08:35Z
+**Analyzed:** 2026-05-17T07:17:47Z
 
 ## Notable moments
 - **Longest contribution** — Speaker A, 42.44 s at 00:00: *"The whole idea is that both of them should be able to understand the entire procedure, how the whole..."*
@@ -37,6 +37,14 @@
 |-----------|------:|----------------:|--------------:|
 | Speaker A | 1 | — | 0 |
 | Speaker B | 1 | — | 1 |
+
+
+## Prosody (per speaker)
+
+| Speaker   | Pitch median | Pitch IQR | Energy median | Energy IQR | Segments |
+|-----------|-------------:|----------:|--------------:|-----------:|---------:|
+| Speaker A | 93.5 Hz | 0.0 Hz | -38.17 dB | 0.0 dB | 1 |
+| Speaker B | 152.84 Hz | 35.38 Hz | -39.13 dB | 3.38 dB | 8 |
 
 ## Who follows whom
 

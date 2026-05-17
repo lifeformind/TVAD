@@ -8,6 +8,7 @@ Section omission rules (per spec):
   - `## Notable moments` omitted when highlights list is empty
   - `## Who follows whom` omitted when there is only one speaker
   - `## Activity over time` omitted when timeline has only one bucket
+  - `## Prosody (per speaker)` omitted when prosody_baselines is None or empty
 """
 
 import os
@@ -47,7 +48,7 @@ def _fmt_quote(q: str) -> str:
     return f'*"{q}"*' if q else ""
 
 
-def render_markdown(metrics: Dict, session_meta: Dict) -> str:
+def render_markdown(metrics: Dict, session_meta: Dict, prosody_baselines: Dict | None = None) -> str:
     lines: List[str] = []
 
     audio = session_meta.get("audio_file", "(unknown source)")
@@ -145,6 +146,32 @@ def render_markdown(metrics: Dict, session_meta: Dict) -> str:
             f"| {sp['speaker']} | {tt['turn_count']} | {gap} | {tt['interruption_count']} |"
         )
     lines.append("")
+
+    # Prosody (per speaker) — only emitted when prosody data is present.
+    if prosody_baselines:
+        lines.append("")
+        lines.append("## Prosody (per speaker)")
+        lines.append("")
+        lines.append("| Speaker   | Pitch median | Pitch IQR | Energy median | Energy IQR | Segments |")
+        lines.append("|-----------|-------------:|----------:|--------------:|-----------:|---------:|")
+        for sp in metrics["speakers"]:
+            sid = sp["speaker_id"]
+            name = sp["speaker"]
+            b = prosody_baselines.get(sid)
+            if b is None:
+                continue  # speaker has no prosody data — skip the row
+            def _fmt(v, unit):
+                return f"{v} {unit}" if v is not None else "—"
+            row = (
+                f"| {name} "
+                f"| {_fmt(b.get('pitch_hz_median'), 'Hz')} "
+                f"| {_fmt(b.get('pitch_hz_iqr'), 'Hz')} "
+                f"| {_fmt(b.get('energy_db_median'), 'dB')} "
+                f"| {_fmt(b.get('energy_db_iqr'), 'dB')} "
+                f"| {b.get('segment_count', 0)} |"
+            )
+            lines.append(row)
+        lines.append("")
 
     # Who follows whom — only when >= 2 speakers.
     if len(metrics["speakers"]) >= 2:

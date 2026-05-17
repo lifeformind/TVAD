@@ -1813,7 +1813,7 @@
     "bucket_seconds": 300,
     "top_k_highlights": 5,
     "quote_max_chars": 100,
-    "analyzed_at": "2026-05-16T11:08:35Z"
+    "analyzed_at": "2026-05-17T07:17:47Z"
   },
   "prosody_baselines": {
     "session_speaker_a": {

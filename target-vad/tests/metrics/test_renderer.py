@@ -148,3 +148,33 @@ class TestRenderer:
         out = renderer.render_markdown(metrics_block, _session_meta())
         assert "(2 enrolled, 1 recurring unknown, 1 catchall)" in out
         assert "**Speakers:** 4 " in out  # 2 + 1 + 1
+
+    def test_prosody_section_omitted_when_no_baselines(self):
+        """No prosody_baselines in input -> the Prosody section is absent."""
+        metrics = _full_metrics_block()
+        out = renderer.render_markdown(metrics, _session_meta(), prosody_baselines=None)
+        assert "## Prosody (per speaker)" not in out
+
+    def test_prosody_section_emitted_when_baselines_present(self):
+        """prosody_baselines provided -> Prosody section appears with per-speaker rows."""
+        metrics = _full_metrics_block()
+        baselines = {
+            "session_speaker_a": {
+                "pitch_hz_median": 138.2, "pitch_hz_iqr": 24.8,
+                "energy_db_median": -25.4, "energy_db_iqr": 6.1,
+                "segment_count": 5,
+            },
+            "session_speaker_b": {
+                "pitch_hz_median": 175.5, "pitch_hz_iqr": 31.0,
+                "energy_db_median": -22.1, "energy_db_iqr": 4.8,
+                "segment_count": 4,
+            },
+        }
+        out = renderer.render_markdown(metrics, _session_meta(), prosody_baselines=baselines)
+        assert "## Prosody (per speaker)" in out
+        # Per-speaker rows present
+        assert "Speaker A" in out and "138.2 Hz" in out
+        assert "Speaker B" in out and "175.5 Hz" in out
+        # Display names from metrics["speakers"], not from baselines keys
+        # The display names are "Speaker A"/"Speaker B" from _full_metrics_block,
+        # while the baselines keys are "session_speaker_a"/"session_speaker_b"

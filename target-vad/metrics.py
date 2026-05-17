@@ -192,7 +192,7 @@ def main(argv: List[str] = None) -> int:
         "audio_file": data.get("audio_file", ""),
         "analyzed_at": data["metrics_config"]["analyzed_at"],
     }
-    md = renderer.render_markdown(block, session_meta)
+    md = renderer.render_markdown(block, session_meta, prosody_baselines=data.get("prosody_baselines"))
 
     if args.report:
         report_path = args.report
