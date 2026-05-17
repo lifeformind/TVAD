@@ -19,6 +19,7 @@ import yaml
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, MofNCompleteColumn, TimeRemainingColumn
 
+from core.errors import print_bad_input, print_env_failure
 from core.io.atomic import atomic_write_json
 from modes.sentiment.classifier import SentimentClassifier
 
@@ -44,44 +45,36 @@ def main(argv: List[str] = None) -> int:
 
     # Load and validate JSON
     if not os.path.exists(args.input):
-        console.print(f"[red]Diarization JSON not found:[/] {args.input}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON not found: {args.input}")
     try:
         with open(args.input) as f:
             data = json.load(f)
     except json.JSONDecodeError as exc:
-        console.print(f"[red]Diarization JSON is malformed:[/] {exc.msg} at offset {exc.pos}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON is malformed: {exc.msg} at offset {exc.pos}")
     if "segments" not in data:
-        console.print("[red]Diarization JSON is missing the [bold]segments[/bold] field.[/]")
-        return EXIT_BAD_INPUT
+        return print_bad_input("Diarization JSON is missing the [bold]segments[/bold] field.")
 
     # Pre-flight: every segment must have a `text` field (transcription pass must have run)
     # and that field must be a string or None (None / "" produce sentiment: null later;
     # other types indicate a corrupt or hand-edited JSON).
     for i, seg in enumerate(data["segments"]):
         if "text" not in seg:
-            console.print(
-                f"[red]Segment {i} has no [bold]text[/bold] field — transcription pass hasn't run yet.[/]\n"
-                "[dim]Run [bold]transcribe.py[/] first to populate text on every segment.[/]"
+            return print_bad_input(
+                f"Segment {i} has no [bold]text[/bold] field — transcription pass hasn't run yet.",
+                hint="Run [bold]transcribe.py[/] first to populate text on every segment.",
             )
-            return EXIT_BAD_INPUT
         text_val = seg["text"]
         if text_val is not None and not isinstance(text_val, str):
-            console.print(
-                f"[red]Segment {i} has [bold]text[/bold] of wrong type: {type(text_val).__name__} (must be string or null).[/]"
+            return print_bad_input(
+                f"Segment {i} has [bold]text[/bold] of wrong type: {type(text_val).__name__} (must be string or null)."
             )
-            return EXIT_BAD_INPUT
 
     # Load config + sentiment block
     config = load_config(args.config)
     try:
         sent_cfg = dict(config["sentiment"])
     except KeyError:
-        console.print(
-            f"[red]Config file {args.config!r} is missing the [bold]sentiment:[/bold] block.[/]"
-        )
-        return EXIT_MODEL_OR_IO
+        return print_env_failure(f"Config file {args.config!r} is missing the [bold]sentiment:[/bold] block.")
 
     # --rerun: clear existing sentiment so the loop processes every segment with text
     if args.rerun:
@@ -125,11 +118,10 @@ def main(argv: List[str] = None) -> int:
         try:
             classifier.load()
         except Exception as exc:
-            console.print(
-                f"[red]Failed to load sentiment models:[/] {exc}\n"
-                "[dim]Check your network, HuggingFace cache, and config.sentiment.*.[/]"
+            return print_env_failure(
+                f"Failed to load sentiment models: {exc}",
+                hint="Check your network, HuggingFace cache, and config.sentiment.*.",
             )
-            return EXIT_MODEL_OR_IO
 
     # Classify in batches with a progress bar
     classified_count = 0
@@ -179,8 +171,7 @@ def main(argv: List[str] = None) -> int:
     try:
         atomic_write_json(out_path, data)
     except Exception as exc:
-        console.print(f"[red]Failed to write output:[/] {exc}")
-        return EXIT_MODEL_OR_IO
+        return print_env_failure(f"Failed to write output: {exc}")
 
     console.print(
         f"[green]Wrote[/] {out_path}\n"

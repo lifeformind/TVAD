@@ -21,6 +21,7 @@ from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, MofNCompleteColumn
 
 from core.audio.load import load_audio_as_mono16k
+from core.errors import print_bad_input, print_env_failure
 from core.io.atomic import atomic_write_json
 from modes.transcription.rolling_context import RollingContext
 from modes.transcription.whisper_runner import WhisperRunner
@@ -51,44 +52,36 @@ def main(argv: List[str] = None) -> int:
 
     # Load and validate JSON
     if not os.path.exists(args.input):
-        console.print(f"[red]Diarization JSON not found:[/] {args.input}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON not found: {args.input}")
     try:
         with open(args.input) as f:
             data = json.load(f)
     except json.JSONDecodeError as exc:
-        console.print(f"[red]Diarization JSON is malformed:[/] {exc.msg} at offset {exc.pos}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON is malformed: {exc.msg} at offset {exc.pos}")
     if "segments" not in data or "audio_file" not in data:
-        console.print("[red]Diarization JSON is missing required fields (segments, audio_file).[/]")
-        return EXIT_BAD_INPUT
+        return print_bad_input("Diarization JSON is missing required fields (segments, audio_file).")
 
     # Load config + apply CLI overrides
     config = load_config(args.config)
     try:
         trans_cfg = dict(config["transcription"])
     except KeyError:
-        console.print(
-            f"[red]Config file {args.config!r} is missing the [bold]transcription:[/bold] block.[/]"
-        )
-        return EXIT_MODEL_OR_IO
+        return print_env_failure(f"Config file {args.config!r} is missing the [bold]transcription:[/bold] block.")
     if args.model is not None:
         trans_cfg["model"] = args.model
 
     # Locate WAV
     audio_path = args.audio if args.audio else data["audio_file"]
     if not os.path.exists(audio_path):
-        console.print(
-            f"[red]Audio file not found:[/] {audio_path}\n"
-            "[dim]Try passing [bold]--audio <path>[/] to point at a moved or re-encoded WAV.[/]"
+        return print_bad_input(
+            f"Audio file not found: {audio_path}",
+            hint="Try passing [bold]--audio <path>[/] to point at a moved or re-encoded WAV.",
         )
-        return EXIT_BAD_INPUT
     try:
         console.print(f"[dim]Loading[/] {audio_path}")
         audio = load_audio_as_mono16k(audio_path)
     except Exception as exc:
-        console.print(f"[red]Failed to read audio:[/] {exc}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Failed to read audio: {exc}")
 
     sr = 16000
     actual_duration = len(audio) / sr
@@ -116,11 +109,10 @@ def main(argv: List[str] = None) -> int:
     try:
         runner.load()
     except Exception as exc:
-        console.print(
-            f"[red]Failed to load whisper model {trans_cfg['model']!r}:[/] {exc}\n"
-            "[dim]Check your network, HuggingFace cache, and config.transcription.model.[/]"
+        return print_env_failure(
+            f"Failed to load whisper model {trans_cfg['model']!r}: {exc}",
+            hint="Check your network, HuggingFace cache, and config.transcription.model.",
         )
-        return EXIT_MODEL_OR_IO
 
     # Build rolling-context window
     initial_prompt_chars = int(trans_cfg.get("initial_prompt_chars", 200))
@@ -196,8 +188,7 @@ def main(argv: List[str] = None) -> int:
     try:
         atomic_write_json(out_path, data)
     except Exception as exc:
-        console.print(f"[red]Failed to write output:[/] {exc}")
-        return EXIT_MODEL_OR_IO
+        return print_env_failure(f"Failed to write output: {exc}")
 
     console.print(
         f"[green]Wrote[/] {out_path}\n"

@@ -21,6 +21,7 @@ from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, MofNCompleteColumn, TimeRemainingColumn
 
 from core.audio.load import load_audio_as_mono16k
+from core.errors import print_bad_input, print_env_failure
 from core.io.atomic import atomic_write_json
 from modes.prosody.analyzer import analyze_segment
 from modes.prosody.baselines import compute_baselines
@@ -50,60 +51,53 @@ def main(argv: List[str] = None) -> int:
 
     # Load JSON.
     if not os.path.exists(args.input):
-        console.print(f"[red]Diarization JSON not found:[/] {args.input}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON not found: {args.input}")
     try:
         with open(args.input) as f:
             data = json.load(f)
     except json.JSONDecodeError as exc:
-        console.print(f"[red]Diarization JSON is malformed:[/] {exc.msg} at offset {exc.pos}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON is malformed: {exc.msg} at offset {exc.pos}")
 
     if "segments" not in data:
-        console.print("[red]Diarization JSON is missing the [bold]segments[/] field.[/]")
-        return EXIT_BAD_INPUT
+        return print_bad_input("Diarization JSON is missing the [bold]segments[/] field.")
 
     passes_run = data.get("passes_run", [])
     if "transcription" not in passes_run:
-        console.print(
-            "[red]This JSON has not been transcribed yet.[/] "
-            "[dim]Run [bold]transcribe.py[/] first.[/]"
+        return print_bad_input(
+            "This JSON has not been transcribed yet.",
+            hint="Run [bold]transcribe.py[/] first.",
         )
-        return EXIT_BAD_INPUT
 
     for i, seg in enumerate(data["segments"]):
         for k in ("text", "words"):
             if k not in seg:
-                console.print(
-                    f"[red]Segment {i} is missing field [bold]{k}[/].[/] "
-                    "[dim]This JSON is in a partial/inconsistent state - rerun transcribe.py.[/]"
+                return print_bad_input(
+                    f"Segment {i} is missing field [bold]{k}[/].",
+                    hint="This JSON is in a partial/inconsistent state - rerun transcribe.py.",
                 )
-                return EXIT_BAD_INPUT
 
     # Resolve audio path.
     audio_path = args.audio or data.get("audio_file", "")
     if not audio_path or not os.path.exists(audio_path):
-        console.print(f"[red]Audio file not found:[/] {audio_path or '(no path given)'}")
-        console.print("[dim]Pass [bold]--audio[/] explicitly if the JSON's audio_file is wrong.[/]")
-        return EXIT_BAD_INPUT
+        return print_bad_input(
+            f"Audio file not found: {audio_path or '(no path given)'}",
+            hint="Pass [bold]--audio[/] explicitly if the JSON's audio_file is wrong.",
+        )
 
     # Load config.
     try:
         cfg_full = load_config(args.config)
     except FileNotFoundError:
-        console.print(f"[red]Config file not found:[/] {args.config}")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure(f"Config file not found: {args.config}")
     cfg = cfg_full.get("prosody")
     if not cfg:
-        console.print("[red]Config is missing the [bold]prosody:[/] block.[/]")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure("Config is missing the [bold]prosody:[/] block.")
 
     # Load audio once.
     try:
         audio = load_audio_as_mono16k(audio_path)
     except Exception as exc:
-        console.print(f"[red]Failed to read audio file:[/] {exc}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Failed to read audio file: {exc}")
 
     # Walk segments.
     segments = data["segments"]
@@ -164,8 +158,7 @@ def main(argv: List[str] = None) -> int:
     try:
         atomic_write_json(out_path, data)
     except Exception as exc:
-        console.print(f"[red]Failed to write prosody JSON:[/] {exc}")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure(f"Failed to write prosody JSON: {exc}")
 
     console.print(
         f"[green]Prosody written:[/] {analyzed} analyzed, {skipped} skipped (already had prosody), "

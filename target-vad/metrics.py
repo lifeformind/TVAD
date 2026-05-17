@@ -18,6 +18,7 @@ from typing import Dict, List
 import yaml
 from rich.console import Console
 
+from core.errors import print_bad_input, print_env_failure
 from core.io.atomic import atomic_write_json
 from modes.metrics import aggregator, renderer
 
@@ -123,55 +124,50 @@ def main(argv: List[str] = None) -> int:
 
     # Load JSON.
     if not os.path.exists(args.input):
-        console.print(f"[red]Diarization JSON not found:[/] {args.input}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON not found: {args.input}")
     try:
         with open(args.input) as f:
             data = json.load(f)
     except json.JSONDecodeError as exc:
-        console.print(f"[red]Diarization JSON is malformed:[/] {exc.msg} at offset {exc.pos}")
-        return EXIT_BAD_INPUT
+        return print_bad_input(f"Diarization JSON is malformed: {exc.msg} at offset {exc.pos}")
 
     if "segments" not in data:
-        console.print("[red]Diarization JSON is missing the [bold]segments[/] field.[/]")
-        return EXIT_BAD_INPUT
+        return print_bad_input("Diarization JSON is missing the [bold]segments[/] field.")
 
     passes_run = data.get("passes_run", [])
     if "transcription" not in passes_run:
-        console.print("[red]This JSON has not been transcribed yet.[/] "
-                      "[dim]Run [bold]transcribe.py[/] first.[/]")
-        return EXIT_BAD_INPUT
+        return print_bad_input(
+            "This JSON has not been transcribed yet.",
+            hint="Run [bold]transcribe.py[/] first.",
+        )
     if "sentiment" not in passes_run:
-        console.print("[red]This JSON has not been sentiment-classified yet.[/] "
-                      "[dim]Run [bold]sentiment.py[/] first.[/]")
-        return EXIT_BAD_INPUT
+        return print_bad_input(
+            "This JSON has not been sentiment-classified yet.",
+            hint="Run [bold]sentiment.py[/] first.",
+        )
 
     for i, seg in enumerate(data["segments"]):
         missing = [k for k in ("text", "words", "sentiment") if k not in seg]
         if missing:
-            console.print(
-                f"[red]Segment {i} is missing field(s) {missing!r}.[/] "
-                "[dim]This JSON is in a partial/inconsistent state — rerun the prior pass.[/]"
+            return print_bad_input(
+                f"Segment {i} is missing field(s) {missing!r}.",
+                hint="This JSON is in a partial/inconsistent state — rerun the prior pass.",
             )
-            return EXIT_BAD_INPUT
 
     # Load config.
     try:
         cfg_full = load_config(args.config)
     except FileNotFoundError:
-        console.print(f"[red]Config file not found:[/] {args.config}")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure(f"Config file not found: {args.config}")
     cfg = cfg_full.get("metrics")
     if not cfg:
-        console.print(f"[red]Config is missing the [bold]metrics:[/] block.[/]")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure("Config is missing the [bold]metrics:[/] block.")
 
     # Build metrics + write.
     try:
         block = _build_metrics_block(data, cfg)
     except Exception as exc:
-        console.print(f"[red]Failed to aggregate metrics:[/] {exc}")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure(f"Failed to aggregate metrics: {exc}")
 
     data["contribution_metrics"] = block
     data["metrics_config"] = {
@@ -189,8 +185,7 @@ def main(argv: List[str] = None) -> int:
     try:
         atomic_write_json(out_json, data)
     except Exception as exc:
-        console.print(f"[red]Failed to write metrics JSON:[/] {exc}")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure(f"Failed to write metrics JSON: {exc}")
 
     # Markdown render + write.
     session_meta = {
@@ -209,8 +204,7 @@ def main(argv: List[str] = None) -> int:
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(md)
     except Exception as exc:
-        console.print(f"[red]Failed to write Markdown report:[/] {exc}")
-        return EXIT_CONFIG_OR_IO
+        return print_env_failure(f"Failed to write Markdown report: {exc}")
 
     speakers_n = len(block["speakers"])
     segs_n = block["session"]["total_segments"]
