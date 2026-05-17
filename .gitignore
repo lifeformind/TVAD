@@ -9,4 +9,5 @@ build/
 !voiceprints/.gitkeep
 .env
 *.wav
+!target-vad/tests/**/fixtures/*.wav
 .claude/
