@@ -216,6 +216,8 @@ py -3.14 metrics.py <diarization.json> [--out <path>] [--report <md-path>] [--co
 
 **Prerequisites:** `passes_run` ⊇ `{"transcription", "sentiment"}` AND every segment must have `text`, `words`, and `sentiment` fields. The `sentiment` field can be the explicit-null sentinel.
 
+**Optional consumed-but-not-required field:** if the JSON also has top-level `prosody_baselines` (from Phase 4), the Markdown report will include a `## Prosody (per speaker)` table summarizing each speaker's pitch + energy distribution. The section is omitted entirely when `prosody_baselines` is absent or empty, so a Phase 3 run on a pre-Phase-4 JSON is backward-compatible.
+
 **Exit codes:** 0 success, 2 missing JSON / missing prerequisite passes / missing segment fields, 3 missing `metrics:` config block / atomic write failure / Markdown write failure.
 
 **No `--rerun` flag** — `metrics.py` is pure aggregation and always overwrites the metrics block + Markdown.

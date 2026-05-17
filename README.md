@@ -293,7 +293,7 @@ TVAD/
 │   │   ├── sentiment/             # HF classifier wrapper
 │   │   ├── metrics/               # aggregators + Markdown renderer
 │   │   └── prosody/               # librosa analyzer + baselines aggregator
-│   ├── tests/                     # 237 tests across 6 test packages, pure-python+mocks where possible
+│   ├── tests/                     # 252 tests across 6 test packages, pure-python+mocks where possible
 │   ├── diarize.py                 # Phase 1 CLI
 │   ├── kiosk.py                   # S2 CLI
 │   ├── transcribe.py              # Phase 2A CLI
@@ -312,7 +312,7 @@ TVAD/
 └── Voice 001 short.wav            # smoke-test fixture audio (~90s)
 ```
 
-Tests run with `py -3.14 -m pytest tests/ -q` from `target-vad/`. 237 tests passing as of the prosody-pass ship (2026-05-16).
+Tests run with `py -3.14 -m pytest tests/ -q` from `target-vad/`. 252 tests passing as of Batch 1 of the post-Phase-4 roadmap (2026-05-17).
 
 ---
 
@@ -327,6 +327,7 @@ Tests run with `py -3.14 -m pytest tests/ -q` from `target-vad/`. 237 tests pass
 - **Phase 3 metrics** — validated 2026-05-16. Coherent JSON block + readable Markdown report. Backward-compatible read path verified.
 - **Phase 4 prosody** — validated 2026-05-16. Speaker A median 93.5 Hz (deep voice); Speaker B median 152.8 Hz, IQR 35.4. Partial-null handling works (pitch null + energy/rate populated on short ambiguous segments).
 - **Recurring-unknown cluster identity** — validated 2026-05-16 both backward-compat (existing fixture) and forward-compat (synthetic no-intros JSON).
+- **Batch 1 of the roadmap (2026-05-17)** — six small items shipped: shared `core/io/atomic.py` + `core/errors.py` extractions (dedupe across 4 CLIs); Phase 4 prosody now visible in Phase 3's Markdown AAR report as a per-speaker table; real-pyin integration test on a 1-second committed speech fixture; 8 new tests for previously-untested Phase 3 highlight kinds; small backlog cleanups. See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 
 ### Validation gaps
 
@@ -337,9 +338,9 @@ Tests run with `py -3.14 -m pytest tests/ -q` from `target-vad/`. 237 tests pass
 
 ### Deferred / out of scope (non-LLM)
 
-- **Phase 3 metrics integration of Phase 4 prosody** — the Markdown report doesn't currently surface prosody data, even though it's in the JSON. Renderer-only change, planned next.
-- **Topic segmentation** — sentence-BERT clustering for topic-boundary detection. Spec not yet written.
+- **Topic segmentation** — sentence-BERT clustering for topic-boundary detection. Spec not yet written. See [ROADMAP.md Batch 3](docs/ROADMAP.md).
 - **Cross-session comparison** — longitudinal aggregation across multiple sessions. Needs a small session-store; defer until multi-session corpus exists.
+- **Phase 4 `frame_length_ms` default review** — Batch 1's real-pyin integration test surfaced that the default `frame_length_ms: 25` paired with `pitch_min_hz: 80` sits on pyin's "≥2 periods of fmin" boundary and produces 0 voiced frames on short segments. Filed as roadmap item 4e for measurement + decision (raise default vs add analyzer-side floor).
 - **Audio-loader cleanup follow-up** — `_atomic_write_json` is currently copy-pasted across 4 CLI entry points; planned extraction to `core/io/atomic.py`.
 
 ### Reserved for LLM-driven future work
