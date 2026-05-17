@@ -2,7 +2,7 @@
 
 The 5-pass offline pipeline (S1, S2, 2A, 2B, 4, 3) shipped 2026-05-14 → 2026-05-16. This document organizes the next set of work into batches by priority and dependency.
 
-**Status as of 2026-05-17:** 237 tests passing on `master`. All 5 passes validated end-to-end on `Voice 001 short.wav`. README + INTEGRATION docs landed. No outstanding bugs in shipped passes.
+**Status as of 2026-05-17:** 252 tests passing on `master`. All 5 passes validated end-to-end on `Voice 001 short.wav`. README + INTEGRATION docs landed. Batch 1 shipped.
 
 Items below are independent unless a dependency is called out. Pick batches based on available time and what's blocked vs unblocked.
 
@@ -175,7 +175,20 @@ Markdown is the only Phase 3 output format. An HTML renderer (with embedded char
 
 If multiple unenrolled speakers in a session don't pass the recurrence threshold, they currently all collapse to the literal `"unknown"` bucket. A future upgrade could preserve pyannote's cluster id for sub-threshold clusters too — at the cost of more "speakers" cluttering the Markdown report. Deferred until classroom recordings show this is a real problem.
 
-### 4e. Speaker-relative z-scores per segment (prosody)
+### 4e. Phase 4 default `frame_length_ms` review
+
+The Phase 4 `config.yaml` default is `frame_length_ms: 25` paired with `pitch_min_hz: 80`. Pyin requires ≥2 periods of fmin per frame (~401 samples at 80 Hz); 25ms = 400 samples is exactly on the boundary and emits a librosa `UserWarning`. The 1d real-pyin integration test discovered that this configuration produces **0 voiced frames on a 1-second real-speech clip** — pyin needs `frame_length_ms ≥ ~32` (or `fmin` raised) to reliably detect pitch.
+
+**Why it hasn't been caught in production:** the Voice 001 smoke runs on segments of 5-42 seconds where many voiced frames accumulate despite the marginal config. But short segments (brief turns, isolated words) would silently return `pitch_hz_median: None`.
+
+**Action options:**
+- Raise the default `frame_length_ms` to 32 or 40 ms in `config.yaml` (simple, low risk)
+- Have `analyzer.py` auto-bump `frame_length` to `int(2 * sample_rate / pitch_min) + 1` when too small, and log a warning
+- Decide via measurement: what's the shortest segment-duration for which `frame_length_ms=25` still produces ≥10 voiced frames? Then update either the default OR the docstring noting the constraint.
+
+**Effort:** ~1 hour (measurement + config or code change + one test). **Blocker:** none.
+
+### 4f. Speaker-relative z-scores per segment (prosody)
 
 Phase 4 emits raw prosody values + per-speaker baselines. Consumers compute z-scores or IQR-offsets themselves. Adding pre-computed z-score fields to each segment would be convenient but doubles the per-segment field count. Defer until a real consumer requests it.
 

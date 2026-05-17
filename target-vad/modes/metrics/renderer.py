@@ -48,6 +48,10 @@ def _fmt_quote(q: str) -> str:
     return f'*"{q}"*' if q else ""
 
 
+def _fmt_value_with_unit(v, unit: str) -> str:
+    return f"{v} {unit}" if v is not None else "—"
+
+
 def render_markdown(metrics: Dict, session_meta: Dict, prosody_baselines: Dict | None = None) -> str:
     lines: List[str] = []
 
@@ -160,14 +164,12 @@ def render_markdown(metrics: Dict, session_meta: Dict, prosody_baselines: Dict |
             b = prosody_baselines.get(sid)
             if b is None:
                 continue  # speaker has no prosody data — skip the row
-            def _fmt(v, unit):
-                return f"{v} {unit}" if v is not None else "—"
             row = (
                 f"| {name} "
-                f"| {_fmt(b.get('pitch_hz_median'), 'Hz')} "
-                f"| {_fmt(b.get('pitch_hz_iqr'), 'Hz')} "
-                f"| {_fmt(b.get('energy_db_median'), 'dB')} "
-                f"| {_fmt(b.get('energy_db_iqr'), 'dB')} "
+                f"| {_fmt_value_with_unit(b.get('pitch_hz_median'), 'Hz')} "
+                f"| {_fmt_value_with_unit(b.get('pitch_hz_iqr'), 'Hz')} "
+                f"| {_fmt_value_with_unit(b.get('energy_db_median'), 'dB')} "
+                f"| {_fmt_value_with_unit(b.get('energy_db_iqr'), 'dB')} "
                 f"| {b.get('segment_count', 0)} |"
             )
             lines.append(row)
