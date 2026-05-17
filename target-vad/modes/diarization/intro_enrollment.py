@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 import numpy as np
+from rich.console import Console
 
 from modes.diarization.manifest import ManifestEntry
 
+console = Console()
 logger = logging.getLogger(__name__)
 
 
@@ -66,11 +68,12 @@ def enroll_from_intros(
         end_i = max(start_i, int(end_clamped * sample_rate))
         slice_duration_s = (end_i - start_i) / sample_rate
         if 0 < slice_duration_s < _MIN_INTRO_DURATION_S:
-            logger.warning(
-                "intro '%s' slice is %.2fs, below ECAPA's %.2fs minimum; "
-                "embedder will reflect-pad and result may be unreliable",
-                entry.id, slice_duration_s, _MIN_INTRO_DURATION_S,
+            console.print(
+                f"[yellow]warning:[/] intro entry for id={entry.id!r} has duration "
+                f"{slice_duration_s:.2f}s (< {_MIN_INTRO_DURATION_S:.1f}s) — embedding may fail "
+                f"or be unstable. Consider lengthening this manifest entry. Skipping."
             )
+            continue
         slice_audio = audio[start_i:end_i]
         embedding = embedder.extract(slice_audio, sample_rate=sample_rate)
         results.append(IntroVoiceprint(id=entry.id, name=entry.name, embedding=embedding))

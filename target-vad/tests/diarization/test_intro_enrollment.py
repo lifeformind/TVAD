@@ -105,16 +105,34 @@ class TestEnrollFromIntros:
         # Warning surfaces the issue
         assert any("past audio end" in rec.message for rec in caplog.records)
 
-    def test_warns_on_short_slice(self, fake_embedder, caplog):
-        import logging
+    def test_skips_and_warns_on_short_slice(self, fake_embedder, capsys):
         fake_embedder.extract.return_value = unit_vec(1)
         audio = np.zeros(30 * SR, dtype=np.float32)
         # 500 ms slice — below ECAPA's 800 ms minimum
         manifest = [ManifestEntry(id="brief", name="Brief", start=1.0, end=1.5)]
-        with caplog.at_level(logging.WARNING, logger="modes.diarization.intro_enrollment"):
-            result = enroll_from_intros(audio, SR, manifest, fake_embedder)
+        result = enroll_from_intros(audio, SR, manifest, fake_embedder)
+        # Short-slice entry must be skipped, not embedded
+        assert len(result) == 0
+        fake_embedder.extract.assert_not_called()
+        # Warning must appear in rich console output
+        captured = capsys.readouterr()
+        assert "brief" in captured.out
+        assert "< 0.8s" in captured.out or "0.50s" in captured.out
+
+    def test_short_slice_skipped_but_other_entries_kept(self, fake_embedder, capsys):
+        emb_a = unit_vec(1)
+        fake_embedder.extract.return_value = emb_a
+        audio = np.zeros(30 * SR, dtype=np.float32)
+        # First entry is too short; second is fine
+        manifest = [
+            ManifestEntry(id="brief", name="Brief", start=1.0, end=1.5),
+            ManifestEntry(id="alice", name="Alice", start=2.0, end=12.0),
+        ]
+        result = enroll_from_intros(audio, SR, manifest, fake_embedder)
+        # Only the valid entry is enrolled
         assert len(result) == 1
-        assert any("below ECAPA's" in rec.message for rec in caplog.records)
+        assert result[0].id == "alice"
+        fake_embedder.extract.assert_called_once()
 
 
 class TestSessionEnrollmentView:
