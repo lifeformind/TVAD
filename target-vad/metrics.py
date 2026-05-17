@@ -13,12 +13,12 @@ import datetime as dt
 import json
 import os
 import sys
-import tempfile
 from typing import Dict, List
 
 import yaml
 from rich.console import Console
 
+from core.io.atomic import atomic_write_json
 from modes.metrics import aggregator, renderer
 
 console = Console()
@@ -31,19 +31,6 @@ EXIT_CONFIG_OR_IO = 3
 def load_config(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f) or {}
-
-
-def _atomic_write_json(path: str, data: dict) -> None:
-    dirname = os.path.dirname(os.path.abspath(path))
-    fd, tmp_path = tempfile.mkstemp(prefix=".tmp.", suffix=".json", dir=dirname)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_path, path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise
 
 
 def _merged_speech_seconds(segments: List[Dict]) -> float:
@@ -200,7 +187,7 @@ def main(argv: List[str] = None) -> int:
 
     out_json = args.out or args.input
     try:
-        _atomic_write_json(out_json, data)
+        atomic_write_json(out_json, data)
     except Exception as exc:
         console.print(f"[red]Failed to write metrics JSON:[/] {exc}")
         return EXIT_CONFIG_OR_IO

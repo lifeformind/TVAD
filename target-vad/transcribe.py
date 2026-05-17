@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 from typing import List
 
 import yaml
@@ -22,6 +21,7 @@ from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, MofNCompleteColumn
 
 from core.audio.load import load_audio_as_mono16k
+from core.io.atomic import atomic_write_json
 from modes.transcription.rolling_context import RollingContext
 from modes.transcription.whisper_runner import WhisperRunner
 
@@ -37,19 +37,6 @@ def load_config(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
 
-
-def _atomic_write_json(path: str, data: dict) -> None:
-    """Write JSON to a sibling .tmp file then atomic-rename to `path`."""
-    dirname = os.path.dirname(os.path.abspath(path))
-    fd, tmp_path = tempfile.mkstemp(prefix=".tmp.", suffix=".json", dir=dirname)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_path, path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise
 
 
 def main(argv: List[str] = None) -> int:
@@ -207,7 +194,7 @@ def main(argv: List[str] = None) -> int:
     # Atomic write
     out_path = args.out or args.input
     try:
-        _atomic_write_json(out_path, data)
+        atomic_write_json(out_path, data)
     except Exception as exc:
         console.print(f"[red]Failed to write output:[/] {exc}")
         return EXIT_MODEL_OR_IO
