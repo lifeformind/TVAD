@@ -61,7 +61,7 @@ class TalkbackController:
         self._barge_in_require_speaker_match = True
 
     def _emit(self, event: str, payload: dict) -> None:
-        self._emit(event, payload)
+        self._logger.log(event, payload)
         if self._on_event:
             try:
                 self._on_event(event, payload)
