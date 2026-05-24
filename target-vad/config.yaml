@@ -14,7 +14,7 @@ core:
     enrollment_max_retries: 3
 
   audio:
-    device_index: 4
+    device_index: null
     channels: 1
     sample_rate: 16000
     chunk_size: 480
@@ -42,8 +42,8 @@ kiosk:
   talkback:
     sample_rate_hz: 16000
     frame_ms: 10
-    output_device: 4
-    input_device: 4
+    output_device: null
+    input_device: null
 
     aec:
       enabled: true

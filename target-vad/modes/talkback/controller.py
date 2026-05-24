@@ -73,6 +73,10 @@ class TalkbackController:
         self._running = True
         self._transition(TalkbackState.LISTENING)
 
+        # Force a fresh aiohttp session — the warmup ping ran on a
+        # different event loop that's now closed.
+        await self._llm.close()
+
         session_id = uuid.uuid4().hex[:12]
         self._logger.start_session(session_id)
 
