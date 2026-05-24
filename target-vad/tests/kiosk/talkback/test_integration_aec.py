@@ -7,12 +7,16 @@ at a known SNR, runs through APM, and asserts > 10 dB suppression.
 import numpy as np
 import pytest
 
+import os
 from unittest.mock import MagicMock
 try:
     from webrtc_audio_processing import AudioProcessingModule
     HAS_APM = not isinstance(AudioProcessingModule, MagicMock)
 except (ImportError, OSError):
     HAS_APM = False
+
+if not HAS_APM:
+    HAS_APM = os.path.exists(os.path.expanduser("~/.local/lib/libaec_shim.so"))
 
 from modes.talkback.aec import AecProcessor
 
