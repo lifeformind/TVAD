@@ -35,8 +35,8 @@ class TtsEngine:
         if self._model is not None:
             return
         if self._backend == "kokoro":
-            import kokoro
-            self._model = kokoro.KokoroTTS(voice=self._voice, device=self._device)
+            from kokoro import KPipeline
+            self._model = KPipeline(lang_code="a", device=self._device)
         else:
             raise ValueError(f"Unsupported TTS backend: {self._backend}")
 
@@ -49,7 +49,14 @@ class TtsEngine:
         return self._resample(audio)
 
     def _synthesize_sync(self, text: str) -> np.ndarray:
-        return self._model.synthesize(text)
+        chunks = []
+        for result in self._model(text, voice=self._voice, speed=1.0):
+            if result.audio is not None:
+                audio = result.audio.cpu().numpy() if hasattr(result.audio, 'cpu') else np.array(result.audio)
+                chunks.append(audio.astype(np.float32))
+        if not chunks:
+            return np.array([], dtype=np.float32)
+        return np.concatenate(chunks)
 
     def _resample(self, audio: np.ndarray) -> np.ndarray:
         if len(audio) == 0:
