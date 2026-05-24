@@ -1,6 +1,7 @@
 """KioskPipeline — state machine for the wake-word talkback kiosk."""
 
 import sys
+import threading
 import time
 import traceback
 from typing import Any, Callable, Optional
@@ -50,6 +51,10 @@ class KioskPipeline:
         self._silence_timeout_s = kiosk_cfg["session_silence_timeout_s"]
         self._hard_timeout_s = kiosk_cfg["session_hard_timeout_s"]
         self._smoother_cfg = kiosk_cfg["decision_smoother"]
+        watchdog_cfg = kiosk_cfg.get("watchdog", {})
+        self._watchdog_tick_s = watchdog_cfg.get("tick_ms", 500) / 1000.0
+        self._watchdog_stop = threading.Event()
+        self._watchdog_thread: threading.Thread | None = None
 
         self.mic = _mic or MicrophoneStream(config["core"]["audio"])
         self.vad = _vad or SileroVAD(config["core"]["vad"])
@@ -78,16 +83,35 @@ class KioskPipeline:
         """Signal run() to exit cleanly on the next loop iteration."""
         self._running = False
 
-    def run(self) -> None:
-        """Main mic loop. Blocks until stop() is called or KeyboardInterrupt.
+    def _start_watchdog(self) -> None:
+        self._watchdog_stop.clear()
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop, daemon=True
+        )
+        self._watchdog_thread.start()
 
-        Note: this loop is driven entirely by mic chunks. Session timeouts
-        (silence and hard) are checked on each chunk arrival in
-        _handle_active_chunk, so they cannot fire if the mic stops producing
-        chunks (e.g., disconnected). In practice the C10 always emits chunks
-        (even silence), so this is a latent risk rather than a current bug.
-        """
+    def _stop_watchdog(self) -> None:
+        self._watchdog_stop.set()
+        if self._watchdog_thread is not None:
+            self._watchdog_thread.join(timeout=2.0)
+            self._watchdog_thread = None
+
+    def _watchdog_loop(self) -> None:
+        while not self._watchdog_stop.wait(timeout=self._watchdog_tick_s):
+            if self._state != "ACTIVE_SESSION" or self._session is None:
+                continue
+            now = time.monotonic()
+            if self._session.session_duration(now) >= self._hard_timeout_s:
+                self._end_session("hard_timeout")
+                return
+            if self._session.silence_duration(now) >= self._silence_timeout_s:
+                self._end_session("silence_timeout")
+                return
+
+    def run(self) -> None:
+        """Main mic loop. Blocks until stop() is called or KeyboardInterrupt."""
         self._running = True
+        self._start_watchdog()
         try:
             with self.mic:
                 for chunk in self.mic.stream():
@@ -97,6 +121,7 @@ class KioskPipeline:
         except KeyboardInterrupt:
             pass
         finally:
+            self._stop_watchdog()
             self._running = False
             if self._state == "ACTIVE_SESSION":
                 self._end_session("stopped")
