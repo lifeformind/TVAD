@@ -168,6 +168,28 @@ def main():
             stt=stt, llm=llm, tts=tts, player=player, logger=logger,
         )
 
+        # Warm up backends before entering the mic loop so the first
+        # handoff doesn't stall on model downloads / cold starts.
+        import asyncio
+        import numpy as np
+
+        with console.status("[bold]Loading STT model (faster-whisper large-v3)..."):
+            stt._ensure_model()
+        console.print("[green]✓[/] STT loaded")
+
+        with console.status("[bold]Loading TTS model (Kokoro)..."):
+            tts._ensure_model()
+        console.print("[green]✓[/] TTS loaded")
+
+        with console.status("[bold]Checking LLM server..."):
+            llm_ok = asyncio.run(llm.ping())
+        if llm_ok:
+            console.print("[green]✓[/] LLM server reachable")
+        else:
+            console.print("[red]✗[/] LLM server unreachable at " + llm_cfg.get("base_url", "http://127.0.0.1:8080/v1"))
+            console.print("[dim]Start llama-server and retry.[/]")
+            sys.exit(3)
+
         console.print(
             f"[bold][TALKBACK][/] Listening for [bold cyan]\"{config['kiosk']['wake_phrase']}\"[/]..."
         )

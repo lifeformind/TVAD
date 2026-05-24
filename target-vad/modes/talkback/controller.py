@@ -7,6 +7,7 @@ Called by KioskPipeline.run() via TalkbackHandoff; returns TalkbackResult.
 import asyncio
 import enum
 import time
+import uuid
 from typing import Optional
 
 import numpy as np
@@ -71,6 +72,9 @@ class TalkbackController:
         self._last_speech_at = self._started_at
         self._running = True
         self._transition(TalkbackState.LISTENING)
+
+        session_id = uuid.uuid4().hex[:12]
+        self._logger.start_session(session_id)
 
         config = handoff.config
         silence_timeout = config.get("silence_timeout_s", 10.0)

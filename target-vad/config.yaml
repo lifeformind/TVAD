@@ -14,7 +14,7 @@ core:
     enrollment_max_retries: 3
 
   audio:
-    device_index: null
+    device_index: 4
     channels: 1
     sample_rate: 16000
     chunk_size: 480
@@ -42,17 +42,17 @@ kiosk:
   talkback:
     sample_rate_hz: 16000
     frame_ms: 10
-    output_device: null
-    input_device: null
+    output_device: 4
+    input_device: 4
 
     aec:
       enabled: true
       suppression_level: "high"
 
     stt:
-      model: "large-v3"
-      compute_type: "float16"
-      device: "cuda"
+      model: "tiny"
+      compute_type: "int8"
+      device: "cpu"
       partials_every_ms: 300
       end_of_utterance_tail_ms: 400
 
