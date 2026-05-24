@@ -15,6 +15,7 @@ from core.speaker.verifier import cosine_similarity
 from core.vad.silero_vad import SileroVAD, SpeechSegment
 from modes.kiosk.session import Session
 from modes.kiosk.wake_word import WakeWordDetector
+from modes.talkback.handoff import TalkbackHandoff, TalkbackResult
 
 
 class KioskPipeline:
@@ -39,6 +40,7 @@ class KioskPipeline:
         _vad: Optional[Any] = None,
         _embedder: Optional[Any] = None,
         _wake_detector: Optional[Any] = None,
+        _talkback_controller: Optional[Any] = None,
     ):
         self.config = config
         self.on_primary_speech = on_primary_speech
@@ -51,6 +53,9 @@ class KioskPipeline:
         self._silence_timeout_s = kiosk_cfg["session_silence_timeout_s"]
         self._hard_timeout_s = kiosk_cfg["session_hard_timeout_s"]
         self._smoother_cfg = kiosk_cfg["decision_smoother"]
+        self._talkback_enabled = kiosk_cfg.get("talkback_enabled", False)
+        self._talkback_config = kiosk_cfg.get("talkback", {})
+        self._talkback_controller = _talkback_controller
         watchdog_cfg = kiosk_cfg.get("watchdog", {})
         self._watchdog_tick_s = watchdog_cfg.get("tick_ms", 500) / 1000.0
         self._watchdog_stop = threading.Event()
@@ -166,7 +171,6 @@ class KioskPipeline:
         try:
             embedding = self.embedder.extract(segment.audio)
         except Exception:
-            # Embedding the first segment failed; abort to IDLE.
             self._state = "IDLE"
             self._wake_time = None
             self.wake_detector.reset()
@@ -183,15 +187,25 @@ class KioskPipeline:
         self._safe_callback(self.on_event, "session_started",
                             {"snapshot_norm": float(np.linalg.norm(embedding))})
         self._safe_callback(self.on_session_started)
-        # The first segment IS primary speech by definition (the speaker who just spoke
-        # after the wake word). Fire on_primary_speech immediately without smoother voting,
-        # so single-utterance sessions still produce a primary event.
-        self._safe_callback(self.on_event, "segment_scored", {
-            "score": 1.0,  # vs itself, by definition
-            "duration_ms": float(segment.duration_ms),
-            "decision": "match",
-        })
-        self._safe_callback(self.on_primary_speech, segment, embedding)
+
+        if self._talkback_enabled and self._talkback_controller is not None:
+            self._safe_callback(self.on_event, "handoff_to_talkback",
+                                {"primary_embedding_norm": float(np.linalg.norm(embedding))})
+            handoff = TalkbackHandoff(
+                mic=self.mic,
+                primary_embedding=embedding,
+                first_segment=segment,
+                config=self._talkback_config,
+            )
+            result = self._talkback_controller.run(handoff)
+            self._end_session(result.reason)
+        else:
+            self._safe_callback(self.on_event, "segment_scored", {
+                "score": 1.0,
+                "duration_ms": float(segment.duration_ms),
+                "decision": "match",
+            })
+            self._safe_callback(self.on_primary_speech, segment, embedding)
 
     def _handle_active_chunk(self, chunk: np.ndarray) -> None:
         # Check timeouts before processing more audio.
