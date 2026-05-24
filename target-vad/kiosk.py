@@ -72,6 +72,9 @@ def make_talkback_callbacks():
             console.print(f"[green][USER][/] \"{payload['text']}\"")
         elif event_type == "llm_response_started":
             console.print(f"[dim][LLM][/] first token in {payload['time_to_first_token_ms']:.0f}ms")
+        elif event_type == "llm_response_complete":
+            if "text" in payload:
+                console.print(f"[bold blue][ASSISTANT][/] \"{payload['text']}\"")
         elif event_type == "barge_in":
             console.print(
                 f"[bold red][BARGE-IN][/] cut at {payload['cut_at_ms']:.0f}ms "
@@ -166,6 +169,7 @@ def main():
 
         controller = TalkbackController(
             stt=stt, llm=llm, tts=tts, player=player, logger=logger,
+            on_event=on_event,
         )
 
         # Warm up backends before entering the mic loop so the first

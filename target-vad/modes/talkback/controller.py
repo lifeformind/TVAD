@@ -11,6 +11,7 @@ import uuid
 from typing import Optional
 
 import numpy as np
+import sounddevice as sd
 
 from core.logging.jsonl_logger import EventLogger
 from modes.talkback.chunker import SentenceChunker
@@ -43,12 +44,14 @@ class TalkbackController:
         tts: TtsEngine,
         player: Player,
         logger: EventLogger,
+        on_event: Optional[callable] = None,
     ):
         self._stt = stt
         self._llm = llm
         self._tts = tts
         self._player = player
         self._logger = logger
+        self._on_event = on_event
         self.state = TalkbackState.IDLE
         self._run_result: Optional[TalkbackResult] = None
         self._started_at: float = 0.0
@@ -56,6 +59,14 @@ class TalkbackController:
         self._running = False
         self._conversation: Optional[ConversationManager] = None
         self._barge_in_require_speaker_match = True
+
+    def _emit(self, event: str, payload: dict) -> None:
+        self._emit(event, payload)
+        if self._on_event:
+            try:
+                self._on_event(event, payload)
+            except Exception:
+                pass
 
     def _transition(self, new_state: TalkbackState) -> None:
         self.state = new_state
@@ -93,7 +104,7 @@ class TalkbackController:
         conversation = self._conversation
 
         if not await self._check_llm_available():
-            self._logger.log("session_ended", {
+            self._emit("session_ended", {
                 "reason": "llm_unavailable", "turns": 0,
                 "total_duration_ms": 0,
             })
@@ -110,18 +121,18 @@ class TalkbackController:
             hard_timeout_s=hard_timeout,
         )
 
-        self._logger.log("handoff_to_talkback", {
+        self._emit("handoff_to_talkback", {
             "primary_embedding_norm": float(np.linalg.norm(handoff.primary_embedding)),
         })
 
         first_text = await self._stt.transcribe_segment(handoff.first_segment.audio)
         if first_text:
             self._last_speech_at = time.monotonic()
-            self._logger.log("user_turn_complete", {"text": first_text, "turn_number": 1})
+            self._emit("user_turn_complete", {"text": first_text, "turn_number": 1})
             conversation.add_user_turn(first_text)
 
             self._transition(TalkbackState.SPEAKING)
-            self._logger.log("turn_started", {"turn_number": 1})
+            self._emit("turn_started", {"turn_number": 1})
 
             assistant_text = await self._generate_response(conversation, config)
             if assistant_text:
@@ -148,7 +159,7 @@ class TalkbackController:
             )
 
         self._transition(TalkbackState.IDLE)
-        self._logger.log("session_ended", {
+        self._emit("session_ended", {
             "reason": self._run_result.reason,
             "turns": self._run_result.turns,
             "total_duration_ms": self._run_result.total_duration_s * 1000,
@@ -160,7 +171,7 @@ class TalkbackController:
         self, conversation: ConversationManager, config: dict
     ) -> str:
         messages = conversation.get_messages()
-        self._logger.log("llm_request_sent", {
+        self._emit("llm_request_sent", {
             "messages_count": len(messages),
             "model": config.get("llm", {}).get("model", "unknown"),
         })
@@ -178,7 +189,7 @@ class TalkbackController:
                 break
             full_response.append(token)
             if first_token:
-                self._logger.log("llm_response_started", {
+                self._emit("llm_response_started", {
                     "time_to_first_token_ms": (time.monotonic() - t0) * 1000,
                 })
                 first_token = False
@@ -188,24 +199,31 @@ class TalkbackController:
                 audio = await self._tts.synthesize(chunk)
                 if len(audio) > 0:
                     await self._player.enqueue(audio)
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, lambda a=audio: sd.play(a, samplerate=16000, blocking=True)
+                    )
 
         remaining = chunker.flush()
         if remaining:
             audio = await self._tts.synthesize(remaining)
             if len(audio) > 0:
                 await self._player.enqueue(audio)
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda a=audio: sd.play(a, samplerate=16000, blocking=True)
+                )
 
         response_text = "".join(full_response)
-        self._logger.log("llm_response_complete", {
+        self._emit("llm_response_complete", {
             "tokens": len(full_response),
             "latency_ms": (time.monotonic() - t0) * 1000,
+            "text": response_text,
         })
 
         return response_text
 
     def _handle_timeout(self, reason: str) -> None:
         self._running = False
-        self._logger.log("watchdog_fired", {"reason": reason})
+        self._emit("watchdog_fired", {"reason": reason})
         turns = self._conversation.turn_count if self._conversation else 0
         self._run_result = TalkbackResult(
             reason=reason,
@@ -220,7 +238,7 @@ class TalkbackController:
         self._player.flush()
         self._llm.cancel()
         self._transition(TalkbackState.BARGED_IN)
-        self._logger.log("barge_in", {
+        self._emit("barge_in", {
             "during_state": prior_state,
             "primary_score": primary_score,
             "cut_at_ms": speech_ms,
@@ -230,10 +248,10 @@ class TalkbackController:
         try:
             available = await self._llm.ping()
             if not available:
-                self._logger.log("llm_unavailable", {})
+                self._emit("llm_unavailable", {})
             return available
         except Exception:
-            self._logger.log("llm_unavailable", {})
+            self._emit("llm_unavailable", {})
             return False
 
     def stop(self) -> None:
