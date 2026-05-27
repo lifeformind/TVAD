@@ -14,6 +14,7 @@ import numpy as np
 import sounddevice as sd
 
 from core.logging.jsonl_logger import EventLogger
+from core.speaker.verifier import cosine_similarity
 from modes.talkback.chunker import SentenceChunker
 from modes.talkback.conversation import ConversationManager
 from modes.talkback.handoff import TalkbackHandoff, TalkbackResult
@@ -66,6 +67,10 @@ class TalkbackController:
         self._barge_in_require_speaker_match = True
         self._aec: Optional['AecProcessor'] = None
         self._segment_queue: asyncio.Queue = asyncio.Queue()
+        self._primary_embedding: Optional[np.ndarray] = None
+        self._embedder = None
+        self._talkback_config: dict = {}
+        self._response_task: Optional[asyncio.Task] = None
 
     def _emit(self, event: str, payload: dict) -> None:
         self._logger.log(event, payload)
@@ -227,6 +232,88 @@ class TalkbackController:
         })
 
         return response_text
+
+    async def _generate_and_speak(
+        self, conversation: ConversationManager, config: dict
+    ) -> str:
+        """Cancellable wrapper around _generate_response."""
+        try:
+            return await self._generate_response(conversation, config)
+        except asyncio.CancelledError:
+            self._llm.cancel()
+            raise
+
+    async def _handle_segment(self, segment) -> Optional[asyncio.Task]:
+        """Process a speech segment based on current state.
+
+        Returns an asyncio.Task if a new response was started, None otherwise.
+        """
+        if self.state == TalkbackState.LISTENING:
+            text = await self._stt.transcribe_segment(segment.audio)
+            if not text:
+                return None
+            turn = self._conversation.turn_count + 1
+            self._emit("user_turn_complete", {"text": text, "turn_number": turn})
+            self._conversation.add_user_turn(text)
+            self._transition(TalkbackState.SPEAKING)
+            self._emit("turn_started", {"turn_number": turn})
+            task = asyncio.create_task(
+                self._generate_and_speak(self._conversation, self._talkback_config)
+            )
+            self._response_task = task
+            return task
+
+        elif self.state == TalkbackState.SPEAKING:
+            barge_cfg = self._talkback_config.get("barge_in", {})
+            if not barge_cfg.get("enabled", True):
+                return None
+            if segment.duration_ms < barge_cfg.get("min_speech_ms", 120):
+                return None
+
+            if barge_cfg.get("require_speaker_match", True):
+                loop = asyncio.get_event_loop()
+                embedding = await loop.run_in_executor(
+                    None, self._embedder.extract, segment.audio
+                )
+                score = cosine_similarity(embedding, self._primary_embedding)
+                threshold = barge_cfg.get("speaker_threshold", 0.5)
+                if score < threshold:
+                    self._emit("barge_in_rejected", {
+                        "score": float(score), "threshold": threshold,
+                    })
+                    return None
+            else:
+                score = 1.0
+
+            # Cancel current response
+            if self._response_task and not self._response_task.done():
+                self._response_task.cancel()
+                try:
+                    await self._response_task
+                except asyncio.CancelledError:
+                    pass
+
+            sd.stop()
+            self._handle_barge_in(primary_score=float(score), speech_ms=segment.duration_ms)
+
+            # Transcribe barge-in speech and start new response
+            text = await self._stt.transcribe_segment(segment.audio)
+            if not text:
+                self._transition(TalkbackState.LISTENING)
+                return None
+
+            turn = self._conversation.turn_count + 1
+            self._emit("user_turn_complete", {"text": text, "turn_number": turn})
+            self._conversation.add_user_turn(text)
+            self._transition(TalkbackState.SPEAKING)
+            self._emit("turn_started", {"turn_number": turn})
+            task = asyncio.create_task(
+                self._generate_and_speak(self._conversation, self._talkback_config)
+            )
+            self._response_task = task
+            return task
+
+        return None
 
     async def _listen_loop(
         self,
