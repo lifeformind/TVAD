@@ -23,6 +23,11 @@ from modes.talkback.stt import StreamingStt
 from modes.talkback.tts import TtsEngine
 from modes.talkback.watchdog import AsyncWatchdog
 
+try:
+    from modes.talkback.aec import AecProcessor
+except Exception:  # pragma: no cover
+    AecProcessor = None  # type: ignore[assignment,misc]
+
 
 class TalkbackState(enum.Enum):
     IDLE = "IDLE"
@@ -59,6 +64,8 @@ class TalkbackController:
         self._running = False
         self._conversation: Optional[ConversationManager] = None
         self._barge_in_require_speaker_match = True
+        self._aec: Optional['AecProcessor'] = None
+        self._segment_queue: asyncio.Queue = asyncio.Queue()
 
     def _emit(self, event: str, payload: dict) -> None:
         self._logger.log(event, payload)
@@ -220,6 +227,47 @@ class TalkbackController:
         })
 
         return response_text
+
+    async def _listen_loop(
+        self,
+        mic,
+        vad,
+        embedder,
+        primary_embedding: np.ndarray,
+    ) -> None:
+        loop = asyncio.get_event_loop()
+        mic_iter = mic.stream()
+
+        def _next_chunk():
+            try:
+                return next(mic_iter)
+            except StopIteration:
+                return None
+
+        while self._running:
+            chunk = await loop.run_in_executor(None, _next_chunk)
+            if chunk is None:
+                break
+
+            # Apply AEC during playback to remove echo
+            if self.state == TalkbackState.SPEAKING and self._aec is not None:
+                frame_samples = self._aec.frame_samples
+                cleaned_frames = []
+                for i in range(0, len(chunk), frame_samples):
+                    frame = chunk[i:i + frame_samples]
+                    if len(frame) < frame_samples:
+                        break
+                    ref = self._player.get_reference_frame(frame_samples)
+                    if ref is not None:
+                        frame = self._aec.process_frame(frame, ref)
+                    cleaned_frames.append(frame)
+                if cleaned_frames:
+                    chunk = np.concatenate(cleaned_frames)
+
+            segments = vad.process_chunk(chunk)
+            for seg in segments:
+                self._last_speech_at = time.monotonic()
+                await self._segment_queue.put(seg)
 
     def _handle_timeout(self, reason: str) -> None:
         self._running = False
