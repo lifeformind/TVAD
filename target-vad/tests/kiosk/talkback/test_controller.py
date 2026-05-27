@@ -1,7 +1,7 @@
 """Tests for TalkbackController state machine with fake components."""
 
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -113,3 +113,81 @@ class TestErrorHandling:
 
         result = await ctrl._check_llm_available()
         assert result is False
+
+
+class TestMultiTurnRunAsync:
+    @pytest.mark.asyncio
+    async def test_two_turn_conversation(self):
+        """Controller processes first segment, then a second from the mic."""
+        stt = MagicMock()
+        stt.transcribe_segment = AsyncMock(side_effect=["hello", "thanks"])
+
+        llm = MagicMock()
+        llm.ping = AsyncMock(return_value=True)
+        llm.close = AsyncMock()
+        llm.cancel = MagicMock()
+
+        async def fake_stream(messages):
+            yield "response"
+        llm.stream = fake_stream
+
+        tts = MagicMock()
+        tts.synthesize = AsyncMock(return_value=np.zeros(1600, dtype=np.float32))
+
+        player = MagicMock()
+        player.enqueue = AsyncMock()
+        player.flush = MagicMock()
+        player.get_reference_frame = MagicMock(return_value=None)
+
+        logger = MagicMock()
+        logger.log = MagicMock()
+        logger.start_session = MagicMock()
+
+        ctrl = TalkbackController(
+            stt=stt, llm=llm, tts=tts, player=player, logger=logger,
+        )
+
+        first_seg = make_segment(500)
+        second_seg = make_segment(500)
+
+        # Mic yields one chunk that produces second_seg via VAD, then stops
+        vad = MagicMock()
+        call_count = 0
+        def vad_process(chunk):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return [second_seg]
+            return []
+        vad.process_chunk = vad_process
+
+        embedder = MagicMock()
+
+        chunk = np.zeros(480, dtype=np.float32)
+        mic = MagicMock()
+        mic.stream = MagicMock(return_value=iter([chunk]))
+
+        config = {
+            "silence_timeout_s": 1.0,
+            "hard_timeout_s": 300.0,
+            "watchdog": {"tick_ms": 100},
+            "llm": {"system_prompt": "test"},
+            "chunker": {"max_chunk_chars": 120},
+            "barge_in": {"enabled": False},
+            "aec": {"enabled": False},
+        }
+
+        handoff = TalkbackHandoff(
+            mic=mic,
+            primary_embedding=np.zeros(192, dtype=np.float32),
+            first_segment=first_seg,
+            config=config,
+            vad=vad,
+            embedder=embedder,
+        )
+
+        with patch("modes.talkback.controller.sd"):
+            result = await ctrl._run_async(handoff)
+
+        assert result.turns >= 2
+        assert stt.transcribe_segment.await_count == 2

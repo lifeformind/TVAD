@@ -95,35 +95,46 @@ class TalkbackController:
         self._last_speech_at = self._started_at
         self._running = True
         self._transition(TalkbackState.LISTENING)
+        self._segment_queue = asyncio.Queue()
 
-        # Force a fresh aiohttp session — the warmup ping ran on a
-        # different event loop that's now closed.
         await self._llm.close()
 
         session_id = uuid.uuid4().hex[:12]
         self._logger.start_session(session_id)
 
         config = handoff.config
+        self._talkback_config = config
+        self._primary_embedding = handoff.primary_embedding
+        self._embedder = handoff.embedder
         silence_timeout = config.get("silence_timeout_s", 10.0)
         hard_timeout = config.get("hard_timeout_s", 300.0)
 
+        aec_cfg = config.get("aec", {})
+        if aec_cfg.get("enabled", False) and AecProcessor is not None:
+            try:
+                self._aec = AecProcessor(
+                    sample_rate=config.get("sample_rate_hz", 16000),
+                    frame_ms=config.get("frame_ms", 10),
+                )
+            except Exception:
+                self._aec = None
+        else:
+            self._aec = None
+
         self._conversation = ConversationManager(
             system_prompt=config.get("llm", {}).get(
-                "system_prompt",
-                "You are a concise voice assistant.",
+                "system_prompt", "You are a concise voice assistant.",
             )
         )
         conversation = self._conversation
 
         if not await self._check_llm_available():
             self._emit("session_ended", {
-                "reason": "llm_unavailable", "turns": 0,
-                "total_duration_ms": 0,
+                "reason": "llm_unavailable", "turns": 0, "total_duration_ms": 0,
             })
             return TalkbackResult(reason="llm_unavailable", turns=0, total_duration_s=0.0)
 
         watchdog_tick = config.get("watchdog", {}).get("tick_ms", 500) / 1000.0
-
         watchdog = AsyncWatchdog(
             tick_s=watchdog_tick,
             on_timeout=self._handle_timeout,
@@ -137,28 +148,68 @@ class TalkbackController:
             "primary_embedding_norm": float(np.linalg.norm(handoff.primary_embedding)),
         })
 
+        # Process first speech segment synchronously before starting listen loop
         first_text = await self._stt.transcribe_segment(handoff.first_segment.audio)
+        response_task = None
+
         if first_text:
             self._last_speech_at = time.monotonic()
             self._emit("user_turn_complete", {"text": first_text, "turn_number": 1})
             conversation.add_user_turn(first_text)
-
             self._transition(TalkbackState.SPEAKING)
             self._emit("turn_started", {"turn_number": 1})
+            response_task = asyncio.create_task(
+                self._generate_and_speak(conversation, config)
+            )
+            self._response_task = response_task
 
-            assistant_text = await self._generate_response(conversation, config)
-            if assistant_text:
-                conversation.add_assistant_turn(assistant_text)
-
-            self._transition(TalkbackState.LISTENING)
-
+        # Start continuous mic listener and watchdog
+        listen_task = asyncio.create_task(
+            self._listen_loop(handoff.mic, handoff.vad, handoff.embedder, handoff.primary_embedding)
+        )
         watchdog.start()
+
         try:
             while self._running:
-                await asyncio.sleep(0.05)
+                # Check if response task completed
+                if response_task and response_task.done():
+                    try:
+                        assistant_text = response_task.result()
+                        if assistant_text:
+                            conversation.add_assistant_turn(assistant_text)
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+                    self._transition(TalkbackState.LISTENING)
+                    response_task = None
+                    self._response_task = None
+
+                # Check for new speech segments
+                try:
+                    segment = self._segment_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                new_task = await self._handle_segment(segment)
+                if new_task is not None:
+                    response_task = new_task
+
                 if self._run_result is not None:
                     break
         finally:
+            listen_task.cancel()
+            try:
+                await listen_task
+            except asyncio.CancelledError:
+                pass
+            if response_task and not response_task.done():
+                response_task.cancel()
+                try:
+                    await response_task
+                except asyncio.CancelledError:
+                    pass
             await watchdog.stop()
 
         await self._llm.close()
