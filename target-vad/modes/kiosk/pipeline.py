@@ -196,6 +196,8 @@ class KioskPipeline:
                 primary_embedding=embedding,
                 first_segment=segment,
                 config=self._talkback_config,
+                vad=self.vad,
+                embedder=self.embedder,
             )
             result = self._talkback_controller.run(handoff)
             self._end_session(result.reason)

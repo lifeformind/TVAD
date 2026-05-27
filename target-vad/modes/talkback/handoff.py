@@ -19,6 +19,8 @@ class TalkbackHandoff:
     primary_embedding: np.ndarray
     first_segment: Any
     config: dict
+    vad: Any
+    embedder: Any
 
 
 @dataclass

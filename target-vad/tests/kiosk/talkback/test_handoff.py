@@ -20,6 +20,8 @@ class TestTalkbackHandoff:
             primary_embedding=emb,
             first_segment=seg,
             config=cfg,
+            vad=MagicMock(),
+            embedder=MagicMock(),
         )
         assert h.mic is mic
         assert h.primary_embedding is emb
@@ -33,8 +35,30 @@ class TestTalkbackHandoff:
             primary_embedding=emb,
             first_segment=MagicMock(),
             config={},
+            vad=MagicMock(),
+            embedder=MagicMock(),
         )
         assert h.primary_embedding.shape == (192,)
+
+    def test_construction_with_vad_and_embedder(self):
+        mic = MagicMock()
+        emb = np.ones(192, dtype=np.float32) / np.sqrt(192)
+        seg = MagicMock()
+        seg.duration_ms = 1000.0
+        cfg = {"sample_rate_hz": 16000}
+        vad = MagicMock()
+        embedder = MagicMock()
+
+        h = TalkbackHandoff(
+            mic=mic,
+            primary_embedding=emb,
+            first_segment=seg,
+            config=cfg,
+            vad=vad,
+            embedder=embedder,
+        )
+        assert h.vad is vad
+        assert h.embedder is embedder
 
 
 class TestTalkbackResult:
