@@ -78,6 +78,7 @@ kiosk:
       enabled: true
       require_speaker_match: true
       min_speech_ms: 120
+      speaker_threshold: 0.75
 
     logging:
       jsonl_path: "logs/kiosk-{date}-{session_id}.jsonl"
