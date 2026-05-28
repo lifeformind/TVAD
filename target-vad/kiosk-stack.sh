@@ -6,14 +6,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ---- config (edit here) ----
-MODEL_REPO="Qwen/Qwen2.5-7B-Instruct-GGUF"
-MODEL_GLOB="*q5_k_m*.gguf"
+MODEL_REPO="unsloth/gemma-3-4b-it-GGUF"
+MODEL_GLOB="gemma-3-4b-it-Q5_K_M.gguf"
 HF_CACHE="$HOME/.cache/models"
 N_GPU_LAYERS=-1          # full GPU offload; needs the CUDA build (build-llm)
 N_CTX=4096
 HOST=127.0.0.1
 PORT=8080
-CHAT_FORMAT=chatml       # Qwen 2.5
+# Empty -> use the GGUF's embedded chat template. Required for Gemma 3: the
+# built-in 'gemma'/'chatml' handlers drop the system prompt, so replies ignore
+# the "1-3 sentences, no markdown" instruction and run to the token cap.
+CHAT_FORMAT=""
 READY_TIMEOUT_S=120
 
 PID_FILE="$SCRIPT_DIR/.llm.pid"
@@ -27,9 +30,10 @@ export PIP_BREAK_SYSTEM_PACKAGES=1
 log() { printf '\033[1m[stack]\033[0m %s\n' "$*"; }
 err() { printf '\033[31m[stack]\033[0m %s\n' "$*" >&2; }
 
-# Echo the resolved q5 model path, preferring a split's first shard. Empty if absent.
+# Echo the resolved model path, preferring a split's first shard. Empty if absent.
+# Derives the HF cache dir from MODEL_REPO (org/name -> models--org--name).
 resolve_model() {
-  local dir="$HF_CACHE/models--Qwen--Qwen2.5-7B-Instruct-GGUF/snapshots"
+  local dir="$HF_CACHE/models--${MODEL_REPO//\//--}/snapshots"
   local shard
   shard="$(ls -1 "$dir"/*/$MODEL_GLOB 2>/dev/null | grep -E '00001-of-' | head -n1 || true)"
   if [[ -n "$shard" ]]; then echo "$shard"; return 0; fi
@@ -106,12 +110,14 @@ cmd_stop() {
 start_llm_bg() {
   mkdir -p "$LOG_DIR"
   log "Starting llama_cpp.server on $HOST:$PORT (n_gpu_layers=$N_GPU_LAYERS)..."
+  local extra=()
+  [[ -n "$CHAT_FORMAT" ]] && extra+=(--chat_format "$CHAT_FORMAT")
   nohup python3 -m llama_cpp.server \
     --model "$MODEL" \
     --host "$HOST" --port "$PORT" \
     --n_ctx "$N_CTX" \
     --n_gpu_layers "$N_GPU_LAYERS" \
-    --chat_format "$CHAT_FORMAT" \
+    "${extra[@]}" \
     >"$LLM_LOG" 2>&1 &
   echo $! > "$PID_FILE"
   WE_STARTED_LLM=1
