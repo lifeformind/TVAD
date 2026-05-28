@@ -90,7 +90,19 @@ cmd_status() {
   local model; model="$(resolve_model)"
   if [[ -n "$model" ]]; then log "Model: $model"; else log "Model: not downloaded (run: $0 download-model)"; fi
 }
-cmd_stop()     { err "stop not implemented yet"; exit 1; }
+cmd_stop() {
+  local pid; pid="$(llm_pid)"
+  if [[ -z "$pid" ]]; then log "No .llm.pid found; nothing to stop."; return 0; fi
+  if kill -0 "$pid" 2>/dev/null; then
+    log "Stopping LLM (pid $pid)..."
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+    if kill -0 "$pid" 2>/dev/null; then log "Still alive; forcing kill."; kill -KILL "$pid" 2>/dev/null || true; fi
+  else
+    log "LLM pid $pid is not running (stale pid file)."
+  fi
+  rm -f "$PID_FILE"
+}
 cmd_start()    { err "start not implemented yet"; exit 1; }
 
 usage() {
