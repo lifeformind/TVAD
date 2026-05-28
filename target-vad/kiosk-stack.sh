@@ -103,7 +103,66 @@ cmd_stop() {
   fi
   rm -f "$PID_FILE"
 }
-cmd_start()    { err "start not implemented yet"; exit 1; }
+start_llm_bg() {
+  mkdir -p "$LOG_DIR"
+  log "Starting llama_cpp.server on $HOST:$PORT (n_gpu_layers=$N_GPU_LAYERS)..."
+  nohup python3 -m llama_cpp.server \
+    --model "$MODEL" \
+    --host "$HOST" --port "$PORT" \
+    --n_ctx "$N_CTX" \
+    --n_gpu_layers "$N_GPU_LAYERS" \
+    --chat_format "$CHAT_FORMAT" \
+    >"$LLM_LOG" 2>&1 &
+  echo $! > "$PID_FILE"
+  WE_STARTED_LLM=1
+}
+
+wait_for_llm() {
+  log "Waiting for LLM to load (timeout ${READY_TIMEOUT_S}s)..."
+  local waited=0
+  while (( waited < READY_TIMEOUT_S )); do
+    if ! llm_alive; then
+      err "LLM process exited during startup. Last log lines:"; tail -n 30 "$LLM_LOG" >&2
+      rm -f "$PID_FILE"; exit 1
+    fi
+    if llm_reachable; then log "LLM ready."; return 0; fi
+    sleep 2; waited=$((waited + 2))
+  done
+  err "LLM not ready after ${READY_TIMEOUT_S}s. Last log lines:"; tail -n 30 "$LLM_LOG" >&2
+  cmd_stop; exit 1
+}
+
+cmd_start() {
+  MODEL="$(resolve_model)"
+  if [[ -z "$MODEL" || ! -f "$MODEL" ]]; then
+    err "No q5 model found under $HF_CACHE. Run: $0 download-model"
+    exit 1
+  fi
+
+  if llm_reachable; then
+    if llm_alive; then
+      log "Reusing the LLM already running from this script (pid $(llm_pid))."
+    else
+      err "Port $PORT is already serving an OpenAI endpoint we did not start (no live .llm.pid)."
+      err "Refusing to touch it. Stop it manually or change PORT."
+      exit 1
+    fi
+  elif port_in_use; then
+    err "Port $PORT is in use by another (non-OpenAI) process. Refusing to start."
+    err "Free the port or change PORT in $0."
+    exit 1
+  else
+    start_llm_bg
+    wait_for_llm
+  fi
+
+  if [[ "${WE_STARTED_LLM:-0}" == "1" ]]; then
+    trap 'cmd_stop' EXIT
+  fi
+
+  log "Launching kiosk (foreground). Ctrl-C to end the session and stop the LLM."
+  python3 kiosk.py --talkback
+}
 
 usage() {
   cat <<EOF
