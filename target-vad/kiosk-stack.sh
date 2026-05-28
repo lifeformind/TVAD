@@ -66,7 +66,18 @@ cmd_download() {
   fi
   log "Model ready: $model"
 }
-cmd_build()    { err "build-llm not implemented yet"; exit 1; }
+cmd_build() {
+  log "Rebuilding llama-cpp-python with CUDA (sm_121). This takes several minutes..."
+  CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=121" \
+    pip install --force-reinstall --no-cache-dir llama-cpp-python
+  if gpu_offload; then
+    log "GPU offload supported. ✓"
+  else
+    err "Build completed but llama_cpp.llama_supports_gpu_offload() is False."
+    err "The CUDA build did not take effect. Check CUDA toolkit / arch and retry."
+    exit 1
+  fi
+}
 cmd_status()   { err "status not implemented yet"; exit 1; }
 cmd_stop()     { err "stop not implemented yet"; exit 1; }
 cmd_start()    { err "start not implemented yet"; exit 1; }
