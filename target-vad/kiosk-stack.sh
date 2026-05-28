@@ -78,7 +78,18 @@ cmd_build() {
     exit 1
   fi
 }
-cmd_status()   { err "status not implemented yet"; exit 1; }
+cmd_status() {
+  local pid; pid="$(llm_pid)"
+  if llm_alive; then log "LLM process: running (pid $pid)"; else log "LLM process: not running"; fi
+  if llm_reachable; then
+    log "LLM endpoint: reachable at http://$HOST:$PORT/v1"
+  else
+    log "LLM endpoint: unreachable"
+  fi
+  if gpu_offload; then log "llama_cpp GPU offload: available"; else log "llama_cpp GPU offload: NOT available (CPU build)"; fi
+  local model; model="$(resolve_model)"
+  if [[ -n "$model" ]]; then log "Model: $model"; else log "Model: not downloaded (run: $0 download-model)"; fi
+}
 cmd_stop()     { err "stop not implemented yet"; exit 1; }
 cmd_start()    { err "start not implemented yet"; exit 1; }
 
