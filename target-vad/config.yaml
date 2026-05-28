@@ -24,7 +24,7 @@ core:
     silero_model_path: null
 
 kiosk:
-  wake_phrase: "hey_jarvis"
+  wake_phrase: "hey_mycroft"
   wake_threshold: 0.5
   awaiting_speech_timeout_s: 5
   session_silence_timeout_s: 10
