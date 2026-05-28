@@ -56,7 +56,16 @@ gpu_offload() {
 }
 
 # ---- subcommands (stubs; filled in later tasks) ----
-cmd_download() { err "download-model not implemented yet"; exit 1; }
+cmd_download() {
+  log "Downloading $MODEL_GLOB from $MODEL_REPO into $HF_CACHE ..."
+  hf download "$MODEL_REPO" --include "$MODEL_GLOB" --cache-dir "$HF_CACHE"
+  local model; model="$(resolve_model)"
+  if [[ -z "$model" ]]; then
+    err "Download finished but no file matching $MODEL_GLOB was found under $HF_CACHE."
+    exit 1
+  fi
+  log "Model ready: $model"
+}
 cmd_build()    { err "build-llm not implemented yet"; exit 1; }
 cmd_status()   { err "status not implemented yet"; exit 1; }
 cmd_stop()     { err "stop not implemented yet"; exit 1; }
