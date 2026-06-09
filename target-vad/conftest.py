@@ -20,6 +20,7 @@ _OPTIONAL_MODULES = [
     "faster_whisper",
     "kokoro",
     "webrtc_audio_processing",
+    "librosa",
 ]
 
 for _mod in _OPTIONAL_MODULES:
