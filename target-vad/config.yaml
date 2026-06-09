@@ -26,8 +26,8 @@ core:
 kiosk:
   wake_phrase: "hey_mycroft"
   wake_threshold: 0.5
-  awaiting_speech_timeout_s: 5
-  session_silence_timeout_s: 10
+  awaiting_speech_timeout_s: 15
+  session_silence_timeout_s: 30
   session_hard_timeout_s: 300
   decision_smoother:
     window_size: 3
@@ -44,6 +44,13 @@ kiosk:
     frame_ms: 10
     output_device: null
     input_device: null
+
+    # Active-conversation timeouts, read by TalkbackController in --talkback mode.
+    # silence_timeout_s: how long a pause between your turns ends the session.
+    # hard_timeout_s: absolute session cap regardless of activity.
+    # (The kiosk.session_*_timeout_s values above govern the non-talkback path.)
+    silence_timeout_s: 30
+    hard_timeout_s: 300
 
     aec:
       enabled: true
