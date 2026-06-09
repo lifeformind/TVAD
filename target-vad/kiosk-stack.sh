@@ -94,18 +94,48 @@ cmd_status() {
   local model; model="$(resolve_model)"
   if [[ -n "$model" ]]; then log "Model: $model"; else log "Model: not downloaded (run: $0 download-model)"; fi
 }
-cmd_stop() {
+# TERM a pid, wait up to ~5s, then KILL. No-op if already gone.
+term_then_kill() {
+  local pid="$1"
+  kill -TERM "$pid" 2>/dev/null || true
+  for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.5; done
+  log "PID $pid still alive; forcing kill."
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
+stop_llm() {
   local pid; pid="$(llm_pid)"
-  if [[ -z "$pid" ]]; then log "No .llm.pid found; nothing to stop."; return 0; fi
+  if [[ -z "$pid" ]]; then log "LLM: no .llm.pid; not started by this script."; return 0; fi
   if kill -0 "$pid" 2>/dev/null; then
     log "Stopping LLM (pid $pid)..."
-    kill -TERM "$pid" 2>/dev/null || true
-    for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
-    if kill -0 "$pid" 2>/dev/null; then log "Still alive; forcing kill."; kill -KILL "$pid" 2>/dev/null || true; fi
+    term_then_kill "$pid"
   else
     log "LLM pid $pid is not running (stale pid file)."
   fi
   rm -f "$PID_FILE"
+}
+
+# Stop any running talkback kiosk, however it was launched (foreground or detached).
+# Match only the actual interpreter process: pgrep -f matches on the whole command
+# line, so an unrelated shell/grep/editor that merely mentions "kiosk.py --talkback"
+# would otherwise be caught and killed. Filter by /proc/<pid>/comm == python*.
+stop_kiosk() {
+  local pid comm found=0
+  for pid in $(pgrep -f 'kiosk\.py --talkback' 2>/dev/null || true); do
+    comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+    [[ "$comm" == python* ]] || continue
+    log "Stopping kiosk (pid $pid)..."
+    term_then_kill "$pid"
+    found=1
+  done
+  [[ "$found" == 0 ]] && log "Kiosk: no running process."
+  return 0
+}
+
+# Full shutdown: kiosk first (so it stops calling the LLM), then the LLM server.
+cmd_stop() {
+  stop_kiosk
+  stop_llm
 }
 start_llm_bg() {
   mkdir -p "$LOG_DIR"
@@ -174,7 +204,7 @@ usage() {
   cat <<EOF
 Usage: $0 {start|stop|status|build-llm|download-model}
   start          bring up the LLM (GPU) then run the kiosk in the foreground
-  stop           stop the LLM server started by this script
+  stop           full shutdown: stop the kiosk (any launch mode) and the LLM server
   status         show LLM / model / GPU status
   build-llm      one-time: rebuild llama-cpp-python with CUDA (sm_121)
   download-model one-time: download the q5 GGUF into the HF cache
