@@ -85,18 +85,21 @@ kiosk:
     # enrolled primary speaker, else it's ignored. Without this, a bystander who
     # speaks in the gap between TTS replies would be transcribed and answered.
     #
-    # ECAPA speaker similarity is only reliable on >=2s of speech: measured
-    # self-similarity is ~0.29 at 1s (sometimes negative!), ~0.48 at 2s, ~0.58
-    # at 3s, while a different speaker stays <=0.21. So we only VERIFY turns of
-    # at least min_verify_ms; shorter turns can't be judged and are accepted
-    # (a bystander's substantial >=2s query is still rejected). Threshold sits
-    # between non-self (<=0.21) and self-at-2s (>=0.35). See
-    # docs/speaker-gate-measurement.md. Inspect live scores with
+    # ECAPA speaker similarity is length-dependent. Measured self vs a different
+    # speaker, with the best single-shot threshold per turn length:
+    #   1.2s: thr 0.19 -> 80% accept-self, 95% reject-other
+    #   1.5s: thr 0.20 -> 91% accept-self, 98% reject-other
+    #   2.0s: thr 0.30 -> 100% / 100%
+    # Conversational turns cluster at 1.2-1.7s, so we verify from min_verify_ms
+    # with a threshold tuned for that range. Shorter turns can't be judged and
+    # are accepted (logged as turn_gate_skipped). Single-shot leaks ~2-5% of
+    # other-speaker turns; harden with M-of-N later if needed. See
+    # docs/speaker-gate-measurement.md; inspect live scores with
     # `bench/speaker_scores.py --source turn_gate`.
     turn_gate:
       require_speaker_match: true
-      speaker_threshold: 0.30
-      min_verify_ms: 2000   # turns shorter than this are accepted unverified
+      speaker_threshold: 0.20
+      min_verify_ms: 1200   # turns shorter than this are accepted unverified
 
     barge_in:
       enabled: true

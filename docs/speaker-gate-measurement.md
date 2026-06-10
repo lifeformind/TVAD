@@ -20,9 +20,15 @@ are ~1s, so even the enrolled speaker scores ~0.3 against their own primary —
 and at 1s self/non-self both sit near zero and don't separate. This is **not** a
 capture bug (SNR 35–49 dB, correct scaling, no contamination in clean sessions).
 
-**Fix direction:** accumulate ≥2–3s before scoring (threshold ~0.30–0.35) and/or
-M-of-N smoothing; enroll a longer primary. A single short turn can't be gated.
-The steps below remain the tools used to reach and confirm this.
+Best single-shot threshold is length-dependent (self vs a different speaker):
+1.2s → 0.19 (80% accept-self / 95% reject-other), 1.5s → 0.20 (91% / 98%),
+2.0s → 0.30 (100% / 100%).
+
+**Shipped config:** verify turns ≥ `min_verify_ms` (1200), accept shorter ones
+(logged `turn_gate_skipped`), `speaker_threshold` 0.20. Single-shot leaks ~2–5%
+of other-speaker turns; harden with M-of-N session lockout if needed. Enroll a
+longer primary for a better reference. The steps below are the tools used to
+reach and confirm this.
 
 ## Step 0 — isolate ECAPA from the pipeline (do this first)
 
