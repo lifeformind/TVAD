@@ -28,6 +28,15 @@ class TestExtractScores:
         assert r.source == "barge_in" and r.decision == "reject"
         assert r.score == pytest.approx(0.247) and r.threshold == pytest.approx(0.75)
 
+    def test_turn_gate_accept_and_reject(self):
+        rows = ss.extract_scores([
+            rec("turn_gate", {"score": 0.71, "threshold": 0.5, "decision": "accept"}),
+            rec("turn_gate", {"score": 0.04, "threshold": 0.5, "decision": "reject"}),
+        ])
+        assert [r.source for r in rows] == ["turn_gate", "turn_gate"]
+        assert [r.decision for r in rows] == ["accept", "reject"]
+        assert rows[0].score == pytest.approx(0.71)
+
     def test_barge_in_accepted_uses_primary_score(self):
         rows = ss.extract_scores([rec("barge_in", {"primary_score": 0.81, "cut_at_ms": 120})])
         assert len(rows) == 1 and rows[0].decision == "accept"

@@ -81,6 +81,17 @@ kiosk:
       sentence_terminators: [".", "?", "!"]
       max_chunk_chars: 120
 
+    # Per-turn speaker lock: every NEW turn (not just barge-in) must match the
+    # enrolled primary speaker, else it's ignored. Without this, a bystander who
+    # speaks in the gap between TTS replies would be transcribed and answered.
+    # Runs in clean conditions (no TTS playing), so the threshold is lower than
+    # barge_in's. Each decision is logged as a `turn_gate` event — inspect the
+    # distribution with `bench/speaker_scores.py --source turn_gate`.
+    turn_gate:
+      require_speaker_match: true
+      speaker_threshold: 0.50
+      min_speech_ms: 0     # 0 = gate every turn; ECAPA reflect-pads short audio
+
     barge_in:
       enabled: true
       require_speaker_match: true

@@ -77,6 +77,8 @@ class TestHandleSegmentListening:
         """LISTENING → transcribes text, starts response task, state → SPEAKING."""
         ctrl = make_ctrl()
         ctrl.state = TalkbackState.LISTENING
+        # Primary speaker passes the turn gate (embedding matches primary).
+        ctrl._embedder.extract = MagicMock(return_value=ctrl._primary_embedding.copy())
         ctrl._stt.transcribe_segment = AsyncMock(return_value="hello there")
         ctrl._generate_response = AsyncMock(return_value="Hi!")
 
@@ -107,6 +109,7 @@ class TestHandleSegmentListening:
         """LISTENING → empty transcript returns None, state stays LISTENING."""
         ctrl = make_ctrl()
         ctrl.state = TalkbackState.LISTENING
+        ctrl._embedder.extract = MagicMock(return_value=ctrl._primary_embedding.copy())
         ctrl._stt.transcribe_segment = AsyncMock(return_value="")
 
         segment = make_segment(500.0)
@@ -116,6 +119,100 @@ class TestHandleSegmentListening:
 
         assert result is None
         assert ctrl.state == TalkbackState.LISTENING
+
+
+# ---------------------------------------------------------------------------
+# TestHandleSegmentTurnGate — speaker lock on NEW turns (not just barge-in)
+# ---------------------------------------------------------------------------
+
+class TestHandleSegmentTurnGate:
+    """A new turn in LISTENING state must come from the enrolled primary speaker.
+
+    Regression: previously the LISTENING branch transcribed and answered ANY
+    speech, so a second (non-enrolled) person was served between TTS replies.
+    """
+
+    def _config(self, **gate):
+        cfg = {"require_speaker_match": True, "speaker_threshold": 0.5}
+        cfg.update(gate)
+        return {"turn_gate": cfg}
+
+    @pytest.mark.asyncio
+    async def test_non_primary_turn_rejected(self):
+        """LISTENING + stranger → no transcription, no turn, stays LISTENING."""
+        ctrl = make_ctrl()
+        ctrl.state = TalkbackState.LISTENING
+        primary = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        stranger = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # cosine 0
+        ctrl._primary_embedding = primary
+        ctrl._embedder.extract = MagicMock(return_value=stranger)
+        ctrl._talkback_config = self._config()
+        ctrl._stt.transcribe_segment = AsyncMock(return_value="who are you")
+
+        with patch("modes.talkback.controller.sd"):
+            result = await ctrl._handle_segment(make_segment(500.0))
+
+        assert result is None
+        assert ctrl.state == TalkbackState.LISTENING
+        # Stranger's speech must never reach STT or the conversation.
+        ctrl._stt.transcribe_segment.assert_not_awaited()
+        assert ctrl._conversation.turn_count == 0
+        events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+        assert "turn_gate" in events
+        assert "user_turn_complete" not in events
+
+    @pytest.mark.asyncio
+    async def test_primary_turn_accepted(self):
+        """LISTENING + primary speaker → transcribed and answered as before."""
+        ctrl = make_ctrl()
+        ctrl.state = TalkbackState.LISTENING
+        primary = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        ctrl._primary_embedding = primary
+        ctrl._embedder.extract = MagicMock(return_value=primary.copy())
+        ctrl._talkback_config = self._config()
+        ctrl._stt.transcribe_segment = AsyncMock(return_value="hello there")
+        ctrl._generate_response = AsyncMock(return_value="Hi!")
+
+        with patch("modes.talkback.controller.sd"):
+            task = await ctrl._handle_segment(make_segment(500.0))
+
+        try:
+            assert task is not None
+            assert ctrl.state == TalkbackState.SPEAKING
+            user_msgs = [m for m in ctrl._conversation.get_messages()
+                         if m["role"] == "user"]
+            assert [m["content"] for m in user_msgs] == ["hello there"]
+        finally:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_gate_disabled_skips_verification(self):
+        """require_speaker_match False → no embedding call, turn proceeds."""
+        ctrl = make_ctrl()
+        ctrl.state = TalkbackState.LISTENING
+        ctrl._embedder.extract = MagicMock()
+        ctrl._talkback_config = self._config(require_speaker_match=False)
+        ctrl._stt.transcribe_segment = AsyncMock(return_value="hello")
+        ctrl._generate_response = AsyncMock(return_value="Hi!")
+
+        with patch("modes.talkback.controller.sd"):
+            task = await ctrl._handle_segment(make_segment(500.0))
+
+        try:
+            assert task is not None
+            ctrl._embedder.extract.assert_not_called()
+        finally:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
 
 # ---------------------------------------------------------------------------

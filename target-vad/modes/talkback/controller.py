@@ -294,12 +294,45 @@ class TalkbackController:
             self._llm.cancel()
             raise
 
+    async def _passes_turn_gate(self, segment) -> bool:
+        """Speaker-lock a NEW turn (LISTENING state) to the enrolled primary.
+
+        The session is locked to whoever passed the kiosk primary-lock; every
+        subsequent turn must match that voice, else a bystander is served
+        between TTS replies. This runs in clean conditions (no TTS playing), so
+        a moderate threshold suffices — lower than barge-in's, which fights echo.
+
+        Returns True when the turn is allowed: gate disabled, no primary
+        enrolled, segment too short to score, or score >= threshold.
+        """
+        gate_cfg = self._talkback_config.get("turn_gate", {})
+        if not gate_cfg.get("require_speaker_match", True):
+            return True
+        if self._primary_embedding is None or self._embedder is None:
+            return True
+        if segment.duration_ms < gate_cfg.get("min_speech_ms", 0):
+            return True
+
+        loop = asyncio.get_event_loop()
+        embedding = await loop.run_in_executor(
+            None, self._embedder.extract, segment.audio
+        )
+        score = float(cosine_similarity(embedding, self._primary_embedding))
+        threshold = gate_cfg.get("speaker_threshold", 0.5)
+        decision = "accept" if score >= threshold else "reject"
+        self._emit("turn_gate", {
+            "score": score, "threshold": threshold, "decision": decision,
+        })
+        return decision == "accept"
+
     async def _handle_segment(self, segment) -> Optional[asyncio.Task]:
         """Process a speech segment based on current state.
 
         Returns an asyncio.Task if a new response was started, None otherwise.
         """
         if self.state == TalkbackState.LISTENING:
+            if not await self._passes_turn_gate(segment):
+                return None
             text = await self._stt.transcribe_segment(segment.audio)
             if not text:
                 return None

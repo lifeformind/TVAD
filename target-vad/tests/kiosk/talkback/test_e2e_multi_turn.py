@@ -91,6 +91,7 @@ class TestE2EMultiTurn:
             "chunker": {"max_chunk_chars": 200},
             "barge_in": {"enabled": False},
             "aec": {"enabled": False},
+            "turn_gate": {"require_speaker_match": False},  # flow test, not gating
         }
 
         handoff = TalkbackHandoff(

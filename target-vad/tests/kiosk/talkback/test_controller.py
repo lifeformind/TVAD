@@ -175,6 +175,7 @@ class TestMultiTurnRunAsync:
             "chunker": {"max_chunk_chars": 120},
             "barge_in": {"enabled": False},
             "aec": {"enabled": False},
+            "turn_gate": {"require_speaker_match": False},  # flow test, not gating
         }
 
         handoff = TalkbackHandoff(

@@ -5,9 +5,14 @@ Extracts every speaker-similarity cosine the kiosk records and summarizes the
 distribution, so a "does the threshold reject a non-self voice?" run can be
 characterized after the fact. The relevant events:
 
+  turn_gate          {"score", "threshold", "decision"}  NEW turn vs primary (clean, no TTS)
   barge_in_rejected  {"score", "threshold"}        voice over TTS, score < threshold -> rejected
   barge_in           {"primary_score", ...}         voice over TTS, score >= threshold -> accepted
   segment_scored     {"score", "decision", ...}     kiosk primary-lock match (console-only today)
+
+The `turn_gate` source is the cleanest non-self signal: it scores every new turn
+in LISTENING state (no TTS playing to corrupt the embedding), unlike barge_in
+which fights echo during playback.
 
 IMPORTANT: a score is self-vs-self unless a *different* person produced it.
 The tool cannot infer that — group by session (--group-by session) and run a
@@ -32,7 +37,7 @@ from typing import Iterable, Iterator, Optional
 
 DEFAULT_GLOB = "logs/kiosk-*.jsonl"
 # thresholds used when the event payload doesn't carry one
-DEFAULT_THRESHOLDS = {"barge_in": 0.75, "primary_match": 0.50}
+DEFAULT_THRESHOLDS = {"turn_gate": 0.50, "barge_in": 0.75, "primary_match": 0.50}
 
 
 @dataclass
@@ -68,7 +73,12 @@ def extract_scores(records: Iterable[dict]) -> list[ScoreRow]:
         payload = r.get("payload", {}) or {}
         sid = r.get("session_id", "?")
         ts = r.get("ts", "")
-        if event == "barge_in_rejected":
+        if event == "turn_gate":
+            decision = "accept" if payload.get("decision") == "accept" else "reject"
+            rows.append(ScoreRow(sid, ts, "turn_gate", event,
+                                 float(payload["score"]),
+                                 _maybe_float(payload.get("threshold")), decision))
+        elif event == "barge_in_rejected":
             rows.append(ScoreRow(sid, ts, "barge_in", event,
                                  float(payload["score"]),
                                  _maybe_float(payload.get("threshold")), "reject"))
@@ -149,7 +159,7 @@ def report(rows: list[ScoreRow], threshold_override: Optional[float], bins: int,
                    "barge_in[_rejected] only logged during --talkback sessions.)")
         return "\n".join(out)
 
-    for source in ("barge_in", "primary_match"):
+    for source in ("turn_gate", "barge_in", "primary_match"):
         srows = [r for r in rows if r.source == source]
         if not srows:
             continue
@@ -176,7 +186,8 @@ def main(argv=None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("paths", nargs="*", help=f"log files/globs (default: {DEFAULT_GLOB})")
     ap.add_argument("--session", help="only this session_id (substring match ok)")
-    ap.add_argument("--source", choices=["barge_in", "primary_match", "all"],
+    ap.add_argument("--source",
+                    choices=["turn_gate", "barge_in", "primary_match", "all"],
                     default="all", help="which score source to include")
     ap.add_argument("--threshold", type=float, default=None,
                     help="override the accept/reject threshold")
