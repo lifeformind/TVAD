@@ -101,6 +101,17 @@ kiosk:
       speaker_threshold: 0.20
       min_verify_ms: 1200   # turns shorter than this are accepted unverified
 
+      # M-of-N lockout: end the session when verified turns stop matching the
+      # primary (a hijacker), so single-shot leaks can't accumulate. Window over
+      # VERIFIED turn scores; lockout when fewer than min_matches of the last
+      # window_size cross the threshold. Default (1 of 3) ends the session after
+      # 3 consecutive verified rejects — frequent for a bystander (~94%), rare
+      # for the real user (~0.3% at the measured false-reject rate).
+      lockout:
+        enabled: true
+        window_size: 3
+        min_matches: 1
+
     barge_in:
       enabled: true
       require_speaker_match: true

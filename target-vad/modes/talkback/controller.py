@@ -16,6 +16,7 @@ import numpy as np
 import sounddevice as sd
 
 from core.logging.jsonl_logger import EventLogger
+from core.speaker.decision_smoother import DecisionSmoother
 from core.speaker.verifier import cosine_similarity
 from modes.talkback.chunker import SentenceChunker
 from modes.talkback.conversation import ConversationManager
@@ -79,6 +80,10 @@ class TalkbackController:
         self._dump_dir = os.environ.get("TVAD_DEBUG_AUDIO_DIR")
         self._dump_n = 0
         self._session_id = ""
+        # M-of-N speaker lockout: a sliding window over VERIFIED turn scores.
+        # Sustained mismatch (a hijacker) ends the session. Set in _run_async.
+        self._gate_smoother: Optional[DecisionSmoother] = None
+        self._gate_scored = 0
 
     def _emit(self, event: str, payload: dict) -> None:
         self._logger.log(event, payload)
@@ -134,6 +139,18 @@ class TalkbackController:
         self._embedder = handoff.embedder
         silence_timeout = config.get("silence_timeout_s", 10.0)
         hard_timeout = config.get("hard_timeout_s", 300.0)
+
+        # Per-session speaker lockout over verified turn scores.
+        gate_cfg = config.get("turn_gate", {})
+        lockout_cfg = gate_cfg.get("lockout", {})
+        self._gate_scored = 0
+        self._gate_smoother = None
+        if lockout_cfg.get("enabled", True):
+            self._gate_smoother = DecisionSmoother(
+                window_size=lockout_cfg.get("window_size", 3),
+                min_matches=lockout_cfg.get("min_matches", 1),
+                threshold=gate_cfg.get("speaker_threshold", 0.2),
+            )
 
         aec_cfg = config.get("aec", {})
         if aec_cfg.get("enabled", False) and AecProcessor is not None:
@@ -360,7 +377,34 @@ class TalkbackController:
             "score": score, "threshold": threshold, "decision": decision,
             "duration_ms": float(segment.duration_ms),
         })
+
+        # M-of-N lockout: feed every verified score into the window. Once the
+        # window is full, a sustained mismatch (smoother no longer sees
+        # min_matches accepts) means a different speaker has taken over — end
+        # the session instead of letting them chip through one slip at a time.
+        if self._gate_smoother is not None:
+            matched = self._gate_smoother.update(score)
+            self._gate_scored += 1
+            if (not matched
+                    and self._gate_scored >= self._gate_smoother.window_size):
+                self._handle_speaker_lockout()
+                return False
+
         return decision == "accept"
+
+    def _handle_speaker_lockout(self) -> None:
+        """End the session: recent verified turns no longer match the primary."""
+        self._running = False
+        self._emit("speaker_lockout", {
+            "window_size": self._gate_smoother.window_size,
+            "min_matches": self._gate_smoother.min_matches,
+        })
+        turns = self._conversation.turn_count if self._conversation else 0
+        self._run_result = TalkbackResult(
+            reason="speaker_lockout",
+            turns=turns,
+            total_duration_s=time.monotonic() - self._started_at,
+        )
 
     async def _handle_segment(self, segment) -> Optional[asyncio.Task]:
         """Process a speech segment based on current state.

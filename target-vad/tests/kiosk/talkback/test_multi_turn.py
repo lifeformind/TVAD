@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
+from core.speaker.decision_smoother import DecisionSmoother
 from core.vad.silero_vad import SpeechSegment
 from modes.talkback.controller import TalkbackController, TalkbackState
 from modes.talkback.conversation import ConversationManager
@@ -243,6 +244,65 @@ class TestHandleSegmentTurnGate:
                     await task
                 except asyncio.CancelledError:
                     pass
+
+
+# ---------------------------------------------------------------------------
+# TestSpeakerLockout — end the session on sustained verified mismatch
+# ---------------------------------------------------------------------------
+
+class TestSpeakerLockout:
+    PRIMARY = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    STRANGER = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # cosine 0 → reject
+    LONG_MS = 2500.0
+
+    def _ctrl(self, window=3, min_matches=1, threshold=0.5):
+        ctrl = make_ctrl()
+        ctrl.state = TalkbackState.LISTENING
+        ctrl._primary_embedding = self.PRIMARY
+        ctrl._talkback_config = {"turn_gate": {
+            "require_speaker_match": True, "speaker_threshold": threshold,
+            "min_verify_ms": 2000}}
+        ctrl._gate_smoother = DecisionSmoother(window, min_matches, threshold)
+        ctrl._gate_scored = 0
+        return ctrl
+
+    async def _gate(self, ctrl, emb):
+        ctrl._embedder.extract = MagicMock(return_value=emb)
+        return await ctrl._passes_turn_gate(make_segment(self.LONG_MS))
+
+    @pytest.mark.asyncio
+    async def test_lockout_after_three_consecutive_rejects(self):
+        ctrl = self._ctrl()
+        for _ in range(2):
+            assert await self._gate(ctrl, self.STRANGER) is False
+            assert ctrl._running is True            # window not full yet
+            assert ctrl._run_result is None
+        # 3rd verified reject fills the window → lockout
+        assert await self._gate(ctrl, self.STRANGER) is False
+        assert ctrl._running is False
+        assert ctrl._run_result is not None
+        assert ctrl._run_result.reason == "speaker_lockout"
+        events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+        assert "speaker_lockout" in events
+
+    @pytest.mark.asyncio
+    async def test_accept_keeps_session_alive(self):
+        ctrl = self._ctrl()
+        await self._gate(ctrl, self.STRANGER)            # reject
+        await self._gate(ctrl, self.PRIMARY.copy())      # accept
+        await self._gate(ctrl, self.STRANGER)            # reject (window has 1 match)
+        await self._gate(ctrl, self.STRANGER)            # reject (window: a,r,r → 1 match)
+        assert ctrl._running is True
+        assert ctrl._run_result is None
+
+    @pytest.mark.asyncio
+    async def test_lockout_disabled_never_fires(self):
+        ctrl = self._ctrl()
+        ctrl._gate_smoother = None                       # lockout off
+        for _ in range(5):
+            assert await self._gate(ctrl, self.STRANGER) is False
+        assert ctrl._running is True
+        assert ctrl._run_result is None
 
 
 # ---------------------------------------------------------------------------
