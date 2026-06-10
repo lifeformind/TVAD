@@ -116,14 +116,60 @@ def separation(within: list[float], crossed: list[float]) -> str:
             "  per-turn ECAPA can't gate reliably on these segments")
 
 
+def analyze_dump(dump_dir: str, clean_wav: str | None,
+                 extractor: EmbeddingExtractor) -> None:
+    """Re-embed the live debug dump (TVAD_DEBUG_AUDIO_DIR) — each WAV is already
+    one segment, so no VAD. Compares every turn to the live primary, and (if a
+    clean recording is given) cross-checks turns against clean self audio."""
+    import glob
+    import os
+    files = sorted(glob.glob(os.path.join(dump_dir, "*.wav")))
+    if not files:
+        print(f"No WAVs in {dump_dir}")
+        return
+    primary_path = next((f for f in files if "primary" in os.path.basename(f)), None)
+    turn_files = [f for f in files if f != primary_path]
+
+    embs = {f: extractor.extract(load_wav(f)) for f in files}
+    print(f"=== live dump: {dump_dir}  ({len(turn_files)} turns) ===")
+    if primary_path:
+        pe = embs[primary_path]
+        print(f"  primary: {os.path.basename(primary_path)}")
+        to_primary = []
+        for f in turn_files:
+            s = float(cosine_similarity(embs[f], pe))
+            to_primary.append(s)
+            print(f"    {os.path.basename(f):40} vs primary = {s:+.3f}")
+        print(f"  turn-vs-primary (re-embedded): {_fmt(stats(to_primary))}")
+    within = pairwise([embs[f] for f in turn_files])
+    print(f"  turn-vs-turn (live, same speaker): {_fmt(stats(within))}")
+
+    if clean_wav:
+        vad = SileroVAD(VAD_CONFIG)
+        clean_embs = embed(segment_audio(load_wav(clean_wav), vad), extractor)
+        crossed = cross([embs[f] for f in turn_files], clean_embs)
+        print(f"\n  live-turn vs CLEAN-self ({clean_wav}): {_fmt(stats(crossed))}")
+        print("  → high here means the live turns ARE you (so the live primary is "
+              "a bad reference); low means the live turn audio is corrupted.")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("self_wav", help="recording of the enrolled speaker")
+    ap.add_argument("self_wav", nargs="?", help="recording of the enrolled speaker")
     ap.add_argument("other_wav", nargs="?", help="recording of a second person")
+    ap.add_argument("--dump-dir", help="analyze a live TVAD_DEBUG_AUDIO_DIR dump")
+    ap.add_argument("--clean", help="clean self recording to cross-check the dump")
     args = ap.parse_args(argv)
 
     extractor = EmbeddingExtractor()
+
+    if args.dump_dir:
+        analyze_dump(args.dump_dir, args.clean or args.self_wav, extractor)
+        return 0
+
+    if not args.self_wav:
+        ap.error("provide self_wav, or --dump-dir for a live dump")
     vad = SileroVAD(VAD_CONFIG)
 
     self_audio = load_wav(args.self_wav)

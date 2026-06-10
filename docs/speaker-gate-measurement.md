@@ -38,8 +38,29 @@ Read the verdict:
 - With `other.wav` it also prints the achievable self-vs-other separation and a
   recommended threshold (or "OVERLAPPING").
 
-If Step 0 shows ECAPA is fine but the live kiosk still scores low, use the live
-two-session protocol below to capture the pipeline's actual `turn_gate` scores.
+If Step 0 shows ECAPA is fine (within-self median ~0.6) but the live kiosk still
+scores near zero, the live pipeline is degrading turn audio. Capture it directly:
+
+## Step 0.5 — dump live segments and re-embed them offline
+
+Run the kiosk with audio dumping on; it writes the primary snapshot and every
+gated turn segment to WAV:
+
+```
+cd target-vad
+TVAD_DEBUG_AUDIO_DIR=debug_audio ./kiosk-stack.sh start
+# wake it, speak several turns, Ctrl-C
+python3 bench/ecapa_selftest.py --dump-dir debug_audio --clean self.wav
+```
+
+This re-embeds the live segments (no VAD — they're already segments) and reports:
+
+- **turn-vs-primary (re-embedded)** — should match the live `turn_gate` scores.
+- **turn-vs-turn (live)** — do the live turns embed consistently with each other?
+- **live-turn vs CLEAN-self** — the decider: **high** means the live turns ARE
+  you, so the live *primary snapshot* is a bad reference (fix enrollment);
+  **low** means the live turn audio itself is corrupted (fix the capture path —
+  e.g. the mic ring buffer dropping chunks, or TTS bleed without AEC).
 
 ## Live two-session protocol (pipeline-level)
 

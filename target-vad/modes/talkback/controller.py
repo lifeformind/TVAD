@@ -6,8 +6,10 @@ Called by KioskPipeline.run() via TalkbackHandoff; returns TalkbackResult.
 
 import asyncio
 import enum
+import os
 import time
 import uuid
+import wave
 from typing import Optional
 
 import numpy as np
@@ -71,6 +73,12 @@ class TalkbackController:
         self._embedder = None
         self._talkback_config: dict = {}
         self._response_task: Optional[asyncio.Task] = None
+        # Debug: when TVAD_DEBUG_AUDIO_DIR is set, dump the primary snapshot and
+        # every gated turn segment to WAV so live audio can be re-embedded
+        # offline (bench/ecapa_selftest.py) and compared to a clean recording.
+        self._dump_dir = os.environ.get("TVAD_DEBUG_AUDIO_DIR")
+        self._dump_n = 0
+        self._session_id = ""
 
     def _emit(self, event: str, payload: dict) -> None:
         self._logger.log(event, payload)
@@ -82,6 +90,22 @@ class TalkbackController:
 
     def _transition(self, new_state: TalkbackState) -> None:
         self.state = new_state
+
+    def _dump_wav(self, audio: np.ndarray, tag: str) -> None:
+        """Write a float32 [-1,1] segment to 16kHz mono int16 WAV (debug only)."""
+        if not self._dump_dir:
+            return
+        try:
+            os.makedirs(self._dump_dir, exist_ok=True)
+            path = os.path.join(self._dump_dir, f"{self._session_id}_{tag}.wav")
+            pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2")
+            with wave.open(path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes(pcm.tobytes())
+        except Exception:
+            pass
 
     def run(self, handoff: TalkbackHandoff) -> TalkbackResult:
         loop = asyncio.new_event_loop()
@@ -100,7 +124,9 @@ class TalkbackController:
         await self._llm.close()
 
         session_id = uuid.uuid4().hex[:12]
+        self._session_id = session_id
         self._logger.start_session(session_id)
+        self._dump_wav(handoff.first_segment.audio, "primary")
 
         config = handoff.config
         self._talkback_config = config
@@ -320,6 +346,8 @@ class TalkbackController:
         score = float(cosine_similarity(embedding, self._primary_embedding))
         threshold = gate_cfg.get("speaker_threshold", 0.5)
         decision = "accept" if score >= threshold else "reject"
+        self._dump_n += 1
+        self._dump_wav(segment.audio, f"turn{self._dump_n:02d}_{score:.2f}")
         self._emit("turn_gate", {
             "score": score, "threshold": threshold, "decision": decision,
             "duration_ms": float(segment.duration_ms),
