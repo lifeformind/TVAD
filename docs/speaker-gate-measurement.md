@@ -5,8 +5,43 @@ the enrolled primary speaker. Its threshold (default `0.50`) was unvalidated:
 the first live run showed the *enrolled* speaker scoring only **0.05–0.39**
 against their own primary in clean conditions, so the gate rejected everyone.
 
-Before picking a threshold (or concluding per-turn gating needs a different
-approach), measure real self vs non-self scores in your actual acoustic setup.
+A follow-up run added segment durations and showed the low scores are **not** a
+short-segment artifact — 1.2–1.7s segments also score near zero, and the scores
+are **bimodal** (a ~0.3–0.57 cluster and a ~0.0 cluster) for the *same* speaker.
+That points to either an unrepresentative primary snapshot or contaminated
+segments in the live pipeline — not segment length.
+
+## Step 0 — isolate ECAPA from the pipeline (do this first)
+
+Before tuning anything, find out whether ECAPA on your mic is even capable of
+consistent embeddings, with the live talkback loop (asyncio, TTS, AEC, VAD
+state) removed. Record plain WAVs and run them through the *same* VAD + ECAPA
+the kiosk uses:
+
+```
+cd target-vad
+arecord -f S16_LE -r 16000 -c 1 -d 25 self.wav      # you, several clear sentences
+arecord -f S16_LE -r 16000 -c 1 -d 25 other.wav     # a second person, same
+
+python3 bench/ecapa_selftest.py self.wav             # within-speaker consistency
+python3 bench/ecapa_selftest.py self.wav other.wav   # + self-vs-other separation
+```
+
+Read the verdict:
+
+- **within-self mean HIGH (~0.6–0.9)** → ECAPA + mic are fine. The low *live*
+  scores are a **pipeline bug** (talkback captures/processes turn segments
+  wrong). Fix that, not the threshold.
+- **within-self mean LOW (~0.3) or bimodal** → ECAPA on this voice/mic is the
+  ceiling. Per-turn gating needs longer windows / M-of-N smoothing / a longer,
+  cleaner enrollment utterance.
+- With `other.wav` it also prints the achievable self-vs-other separation and a
+  recommended threshold (or "OVERLAPPING").
+
+If Step 0 shows ECAPA is fine but the live kiosk still scores low, use the live
+two-session protocol below to capture the pipeline's actual `turn_gate` scores.
+
+## Live two-session protocol (pipeline-level)
 
 ## Why two sessions
 
