@@ -25,6 +25,8 @@ Usage:
   python3 bench/speaker_scores.py --group-by session      # per-session breakdown
   python3 bench/speaker_scores.py --session d678dac57bc1 --label nonself
   python3 bench/speaker_scores.py --source barge_in --threshold 0.75
+  # labeled self-vs-non-self separation (see docs/speaker-gate-measurement.md):
+  python3 bench/speaker_scores.py --source turn_gate --self AAA --nonself BBB
 """
 from __future__ import annotations
 
@@ -147,6 +149,80 @@ def _accept_reject(rows: list[ScoreRow], threshold: float) -> tuple[int, int]:
     return acc, len(rows) - acc
 
 
+def best_threshold(self_scores: list[float],
+                   nonself_scores: list[float]) -> dict:
+    """Find the accept/reject threshold that best separates two labeled groups.
+
+    A turn is accepted when score >= threshold. We sweep candidate thresholds
+    (midpoints between observed scores) and pick the one with the highest
+    balanced accuracy = (true-accept rate + true-reject rate) / 2.
+
+    Returns {} if either group is empty. `margin` is min(self) - max(nonself):
+    positive means the two groups are perfectly separable.
+    """
+    if not self_scores or not nonself_scores:
+        return {}
+    vals = sorted(set(self_scores) | set(nonself_scores))
+    cands = [vals[0] - 0.01]
+    for a, b in zip(vals, vals[1:]):
+        cands.append((a + b) / 2.0)
+    cands.append(vals[-1] + 0.01)
+
+    n_self, n_non = len(self_scores), len(nonself_scores)
+    best = None
+    for t in cands:
+        tpr = sum(s >= t for s in self_scores) / n_self          # accept self
+        tnr = sum(s < t for s in nonself_scores) / n_non         # reject non-self
+        bal = (tpr + tnr) / 2.0
+        if best is None or bal > best["balanced_acc"]:
+            best = {"threshold": t, "tpr": tpr, "tnr": tnr, "balanced_acc": bal}
+    best["margin"] = min(self_scores) - max(nonself_scores)
+    best["separable"] = best["margin"] > 0
+    return best
+
+
+def report_comparison(self_rows: list[ScoreRow], nonself_rows: list[ScoreRow],
+                      bins: int) -> str:
+    """Side-by-side self vs non-self distribution + best-separating threshold."""
+    out = ["=== self vs non-self separation ==="]
+    self_scores = [r.score for r in self_rows]
+    nonself_scores = [r.score for r in nonself_rows]
+    for name, scores in (("self (enrolled)", self_scores),
+                         ("non-self (other)", nonself_scores)):
+        st = summarize(scores)
+        if st["n"] == 0:
+            out.append(f"\n--- {name} ---\n  (no scores)")
+            continue
+        out.append(f"\n--- {name} ---")
+        out.append(f"  n={st['n']}  mean={st['mean']:.3f}  median={st['median']:.3f}  "
+                   f"stdev={st['stdev']:.3f}")
+        out.append(f"  range=[{st['min']:.3f}, {st['max']:.3f}]  "
+                   f"p10={st['p10']:.3f}  p90={st['p90']:.3f}")
+        out.append(histogram(scores, bins=bins))
+
+    bt = best_threshold(self_scores, nonself_scores)
+    out.append("\n--- separation ---")
+    if not bt:
+        out.append("  Need both a self and a non-self group to compare.")
+        return "\n".join(out)
+    verdict = ("CLEANLY SEPARABLE" if bt["separable"]
+               else "OVERLAPPING — no threshold separates them")
+    out.append(f"  margin (min self - max non-self) = {bt['margin']:+.3f}  → {verdict}")
+    out.append(f"  best threshold = {bt['threshold']:.3f}  "
+               f"(accepts {bt['tpr']:.0%} of self, rejects {bt['tnr']:.0%} of non-self, "
+               f"balanced acc {bt['balanced_acc']:.0%})")
+    if bt["separable"]:
+        lo = max(nonself_scores)
+        hi = min(self_scores)
+        out.append(f"  safe threshold band: ({lo:.3f}, {hi:.3f}] — "
+                   f"midpoint {((lo + hi) / 2):.3f} is a robust pick")
+    else:
+        out.append("  Recommendation: per-turn ECAPA on these segments can't gate "
+                   "reliably. Use longer audio windows / M-of-N smoothing, or improve "
+                   "enrollment (longer, cleaner primary utterance).")
+    return "\n".join(out)
+
+
 def report(rows: list[ScoreRow], threshold_override: Optional[float], bins: int,
            label: Optional[str]) -> str:
     out: list[str] = []
@@ -194,6 +270,10 @@ def main(argv=None) -> int:
     ap.add_argument("--label", help="tag the report (e.g. self / nonself)")
     ap.add_argument("--group-by", choices=["session"], default=None,
                     help="print a separate report per session")
+    ap.add_argument("--self", dest="self_session",
+                    help="session_id of the SELF run (enrolled speaker only)")
+    ap.add_argument("--nonself", dest="nonself_session",
+                    help="session_id of the NON-SELF run (other speaker's turns)")
     ap.add_argument("--bins", type=int, default=20, help="histogram bins (default 20)")
     args = ap.parse_args(argv)
 
@@ -210,6 +290,20 @@ def main(argv=None) -> int:
         rows = [r for r in rows if r.source == args.source]
 
     print(f"Scanned {len(files)} file(s); {len(rows)} score event(s).")
+
+    # Labeled comparison mode: self session vs non-self session.
+    if args.self_session or args.nonself_session:
+        src = args.source if args.source != "all" else "turn_gate"
+        cmp_rows = [r for r in rows if r.source == src]
+        self_rows = [r for r in cmp_rows if args.self_session
+                     and args.self_session in r.session_id]
+        nonself_rows = [r for r in cmp_rows if args.nonself_session
+                        and args.nonself_session in r.session_id]
+        print(f"Comparison source: {src}  "
+              f"(self n={len(self_rows)}, non-self n={len(nonself_rows)})")
+        print(report_comparison(self_rows, nonself_rows, args.bins))
+        return 0
+
     if args.group_by == "session":
         for sid in sorted({r.session_id for r in rows}):
             srows = [r for r in rows if r.session_id == sid]

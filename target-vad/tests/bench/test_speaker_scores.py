@@ -79,6 +79,54 @@ class TestStats:
         assert (acc, rej) == (1, 2)
 
 
+class TestSeparation:
+    def test_separable_groups(self):
+        bt = ss.best_threshold(self_scores=[0.6, 0.7, 0.8],
+                               nonself_scores=[0.1, 0.2, 0.3])
+        assert bt["separable"] is True
+        assert bt["margin"] == pytest.approx(0.3)  # 0.6 - 0.3
+        assert 0.3 < bt["threshold"] < 0.6
+        assert bt["tpr"] == 1.0 and bt["tnr"] == 1.0
+        assert bt["balanced_acc"] == 1.0
+
+    def test_overlapping_groups(self):
+        bt = ss.best_threshold(self_scores=[0.1, 0.2, 0.4],
+                               nonself_scores=[0.05, 0.3, 0.5])
+        assert bt["separable"] is False
+        assert bt["margin"] < 0
+        assert bt["balanced_acc"] < 1.0
+
+    def test_empty_group_returns_empty(self):
+        assert ss.best_threshold([], [0.1]) == {}
+        assert ss.best_threshold([0.1], []) == {}
+
+    def test_comparison_report_overlap_recommends_fix(self):
+        self_rows = ss.extract_scores([
+            rec("turn_gate", {"score": 0.05, "threshold": 0.5, "decision": "reject"}),
+            rec("turn_gate", {"score": 0.39, "threshold": 0.5, "decision": "reject"}),
+        ])
+        nonself_rows = ss.extract_scores([
+            rec("turn_gate", {"score": 0.08, "threshold": 0.5, "decision": "reject"}),
+            rec("turn_gate", {"score": 0.20, "threshold": 0.5, "decision": "reject"}),
+        ])
+        text = ss.report_comparison(self_rows, nonself_rows, bins=10)
+        assert "OVERLAPPING" in text
+        assert "self (enrolled)" in text and "non-self (other)" in text
+
+    def test_comparison_report_separable_shows_band(self):
+        self_rows = ss.extract_scores([
+            rec("turn_gate", {"score": 0.62, "threshold": 0.5, "decision": "accept"}),
+            rec("turn_gate", {"score": 0.71, "threshold": 0.5, "decision": "accept"}),
+        ])
+        nonself_rows = ss.extract_scores([
+            rec("turn_gate", {"score": 0.10, "threshold": 0.5, "decision": "reject"}),
+            rec("turn_gate", {"score": 0.22, "threshold": 0.5, "decision": "reject"}),
+        ])
+        text = ss.report_comparison(self_rows, nonself_rows, bins=10)
+        assert "CLEANLY SEPARABLE" in text
+        assert "safe threshold band" in text
+
+
 class TestReport:
     def test_report_mentions_threshold_and_counts(self):
         rows = ss.extract_scores([

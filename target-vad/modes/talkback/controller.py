@@ -322,6 +322,7 @@ class TalkbackController:
         decision = "accept" if score >= threshold else "reject"
         self._emit("turn_gate", {
             "score": score, "threshold": threshold, "decision": decision,
+            "duration_ms": float(segment.duration_ms),
         })
         return decision == "accept"
 
