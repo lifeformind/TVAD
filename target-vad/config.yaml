@@ -81,16 +81,22 @@ kiosk:
       sentence_terminators: [".", "?", "!"]
       max_chunk_chars: 120
 
-    # Per-turn speaker lock: every NEW turn (not just barge-in) must match the
+    # Per-turn speaker lock: a NEW turn (not just barge-in) must match the
     # enrolled primary speaker, else it's ignored. Without this, a bystander who
     # speaks in the gap between TTS replies would be transcribed and answered.
-    # Runs in clean conditions (no TTS playing), so the threshold is lower than
-    # barge_in's. Each decision is logged as a `turn_gate` event — inspect the
-    # distribution with `bench/speaker_scores.py --source turn_gate`.
+    #
+    # ECAPA speaker similarity is only reliable on >=2s of speech: measured
+    # self-similarity is ~0.29 at 1s (sometimes negative!), ~0.48 at 2s, ~0.58
+    # at 3s, while a different speaker stays <=0.21. So we only VERIFY turns of
+    # at least min_verify_ms; shorter turns can't be judged and are accepted
+    # (a bystander's substantial >=2s query is still rejected). Threshold sits
+    # between non-self (<=0.21) and self-at-2s (>=0.35). See
+    # docs/speaker-gate-measurement.md. Inspect live scores with
+    # `bench/speaker_scores.py --source turn_gate`.
     turn_gate:
       require_speaker_match: true
-      speaker_threshold: 0.50
-      min_speech_ms: 0     # 0 = gate every turn; ECAPA reflect-pads short audio
+      speaker_threshold: 0.30
+      min_verify_ms: 2000   # turns shorter than this are accepted unverified
 
     barge_in:
       enabled: true

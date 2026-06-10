@@ -336,7 +336,15 @@ class TalkbackController:
             return True
         if self._primary_embedding is None or self._embedder is None:
             return True
-        if segment.duration_ms < gate_cfg.get("min_speech_ms", 0):
+        # ECAPA can't verify short turns (self-similarity ~0.29 at 1s, often
+        # negative); accept them rather than reject the real speaker. Substantial
+        # turns (>= min_verify_ms) still get gated, which covers the bystander
+        # case. See docs/speaker-gate-measurement.md.
+        if segment.duration_ms < gate_cfg.get("min_verify_ms", 2000):
+            self._emit("turn_gate_skipped", {
+                "duration_ms": float(segment.duration_ms),
+                "reason": "too_short_to_verify",
+            })
             return True
 
         loop = asyncio.get_event_loop()

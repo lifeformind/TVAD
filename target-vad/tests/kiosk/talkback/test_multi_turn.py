@@ -132,14 +132,18 @@ class TestHandleSegmentTurnGate:
     speech, so a second (non-enrolled) person was served between TTS replies.
     """
 
+    # Segments must be >= min_verify_ms (default 2000) to be scored at all.
+    VERIFY_MS = 2500.0
+
     def _config(self, **gate):
-        cfg = {"require_speaker_match": True, "speaker_threshold": 0.5}
+        cfg = {"require_speaker_match": True, "speaker_threshold": 0.5,
+               "min_verify_ms": 2000}
         cfg.update(gate)
         return {"turn_gate": cfg}
 
     @pytest.mark.asyncio
     async def test_non_primary_turn_rejected(self):
-        """LISTENING + stranger → no transcription, no turn, stays LISTENING."""
+        """LISTENING + stranger (long turn) → no transcription, stays LISTENING."""
         ctrl = make_ctrl()
         ctrl.state = TalkbackState.LISTENING
         primary = np.array([1.0, 0.0, 0.0], dtype=np.float32)
@@ -150,7 +154,7 @@ class TestHandleSegmentTurnGate:
         ctrl._stt.transcribe_segment = AsyncMock(return_value="who are you")
 
         with patch("modes.talkback.controller.sd"):
-            result = await ctrl._handle_segment(make_segment(500.0))
+            result = await ctrl._handle_segment(make_segment(self.VERIFY_MS))
 
         assert result is None
         assert ctrl.state == TalkbackState.LISTENING
@@ -162,8 +166,34 @@ class TestHandleSegmentTurnGate:
         assert "user_turn_complete" not in events
 
     @pytest.mark.asyncio
+    async def test_short_turn_accepted_unverified(self):
+        """LISTENING + short turn (< min_verify_ms) → accepted without scoring."""
+        ctrl = make_ctrl()
+        ctrl.state = TalkbackState.LISTENING
+        ctrl._embedder.extract = MagicMock()
+        ctrl._talkback_config = self._config()
+        ctrl._stt.transcribe_segment = AsyncMock(return_value="okay")
+        ctrl._generate_response = AsyncMock(return_value="Sure!")
+
+        with patch("modes.talkback.controller.sd"):
+            task = await ctrl._handle_segment(make_segment(900.0))
+
+        try:
+            assert task is not None              # short turn still answered
+            ctrl._embedder.extract.assert_not_called()  # ECAPA never invoked
+            events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+            assert "turn_gate_skipped" in events
+        finally:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    @pytest.mark.asyncio
     async def test_primary_turn_accepted(self):
-        """LISTENING + primary speaker → transcribed and answered as before."""
+        """LISTENING + primary speaker (long turn) → transcribed and answered."""
         ctrl = make_ctrl()
         ctrl.state = TalkbackState.LISTENING
         primary = np.array([1.0, 0.0, 0.0], dtype=np.float32)
@@ -174,7 +204,7 @@ class TestHandleSegmentTurnGate:
         ctrl._generate_response = AsyncMock(return_value="Hi!")
 
         with patch("modes.talkback.controller.sd"):
-            task = await ctrl._handle_segment(make_segment(500.0))
+            task = await ctrl._handle_segment(make_segment(self.VERIFY_MS))
 
         try:
             assert task is not None
