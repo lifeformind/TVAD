@@ -11,6 +11,19 @@ are **bimodal** (a ~0.3–0.57 cluster and a ~0.0 cluster) for the *same* speake
 That points to either an unrepresentative primary snapshot or contaminated
 segments in the live pipeline — not segment length.
 
+## ROOT CAUSE (found 2026-06-10): ECAPA needs 2–3s, turns are ~1s
+
+Measured on the user's own clean recording, cut to fixed windows (cosine
+self-similarity, median): 1.0s → **0.291** (min −0.052), 1.5s → 0.384,
+2.0s → 0.481, 3.0s → 0.575; long 1–7s segments → ~0.62. Conversational turns
+are ~1s, so even the enrolled speaker scores ~0.3 against their own primary —
+and at 1s self/non-self both sit near zero and don't separate. This is **not** a
+capture bug (SNR 35–49 dB, correct scaling, no contamination in clean sessions).
+
+**Fix direction:** accumulate ≥2–3s before scoring (threshold ~0.30–0.35) and/or
+M-of-N smoothing; enroll a longer primary. A single short turn can't be gated.
+The steps below remain the tools used to reach and confirm this.
+
 ## Step 0 — isolate ECAPA from the pipeline (do this first)
 
 Before tuning anything, find out whether ECAPA on your mic is even capable of
