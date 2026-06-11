@@ -24,11 +24,19 @@ Best single-shot threshold is length-dependent (self vs a different speaker):
 1.2s → 0.19 (80% accept-self / 95% reject-other), 1.5s → 0.20 (91% / 98%),
 2.0s → 0.30 (100% / 100%).
 
-**Shipped config:** verify turns ≥ `min_verify_ms` (1200), accept shorter ones
-(logged `turn_gate_skipped`), `speaker_threshold` 0.20. Single-shot leaks ~2–5%
-of other-speaker turns; harden with M-of-N session lockout if needed. Enroll a
-longer primary for a better reference. The steps below are the tools used to
-reach and confirm this.
+**Shipped config (rolling window):** a single live turn proved *unverifiable* —
+across 9 sessions, genuine-length turns (1.2–2.0s) scored anywhere from −0.14 to
+0.60, so no per-turn `(threshold, min_length)` separates self from a bystander,
+and a `min_verify_ms` skip just let short bystander turns through. Instead,
+consecutive turn audio **accumulates** into a rolling buffer; once it reaches
+`verify_window_ms` (2000) the whole window is embedded and scored once
+(`speaker_threshold` 0.30, where 2s windows give ~100%/100% offline). Sub-window
+turns are served provisionally (logged `turn_gate_pending`) and fed into the next
+window, so a brief utterance never false-rejects the real user. A bystander leaks
+until the window fills, then the window rejects and the M-of-N lockout
+(`lockout`, 1-of-3 rejecting windows) ends the session. Enroll a longer primary
+for an even better reference. The steps below are the tools used to reach and
+confirm this.
 
 ## Step 0 — isolate ECAPA from the pipeline (do this first)
 

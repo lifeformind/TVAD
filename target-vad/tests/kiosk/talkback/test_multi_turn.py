@@ -133,12 +133,13 @@ class TestHandleSegmentTurnGate:
     speech, so a second (non-enrolled) person was served between TTS replies.
     """
 
-    # Segments must be >= min_verify_ms (default 2000) to be scored at all.
+    # A single turn this long fills the verify window (2000) on its own, so it
+    # is scored immediately rather than accumulated.
     VERIFY_MS = 2500.0
 
     def _config(self, **gate):
         cfg = {"require_speaker_match": True, "speaker_threshold": 0.5,
-               "min_verify_ms": 2000}
+               "verify_window_ms": 2000}
         cfg.update(gate)
         return {"turn_gate": cfg}
 
@@ -167,8 +168,13 @@ class TestHandleSegmentTurnGate:
         assert "user_turn_complete" not in events
 
     @pytest.mark.asyncio
-    async def test_short_turn_accepted_unverified(self):
-        """LISTENING + short turn (< min_verify_ms) → accepted without scoring."""
+    async def test_short_turn_accepted_provisionally(self):
+        """LISTENING + sub-window turn → served now, audio buffered for the window.
+
+        A single short turn cannot be embedded reliably (ECAPA needs ~2s), so it
+        is accepted provisionally and its audio accumulates toward the next
+        verification window rather than being scored on its own.
+        """
         ctrl = make_ctrl()
         ctrl.state = TalkbackState.LISTENING
         ctrl._embedder.extract = MagicMock()
@@ -181,9 +187,9 @@ class TestHandleSegmentTurnGate:
 
         try:
             assert task is not None              # short turn still answered
-            ctrl._embedder.extract.assert_not_called()  # ECAPA never invoked
+            ctrl._embedder.extract.assert_not_called()  # ECAPA never invoked yet
             events = [c[0][0] for c in ctrl._logger.log.call_args_list]
-            assert "turn_gate_skipped" in events
+            assert "turn_gate_pending" in events
         finally:
             if task and not task.done():
                 task.cancel()
@@ -247,6 +253,77 @@ class TestHandleSegmentTurnGate:
 
 
 # ---------------------------------------------------------------------------
+# TestRollingWindowGate — accumulate consecutive turns to a reliable window
+# ---------------------------------------------------------------------------
+
+class TestRollingWindowGate:
+    """Per-turn ECAPA can't separate self from a bystander at conversational
+    lengths (~0.3-1.5s). Instead, consecutive turn audio accumulates to a
+    >=verify_window_ms window where ECAPA is reliable, scored once, then reset.
+    """
+
+    PRIMARY = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    STRANGER = np.array([0.0, 1.0, 0.0], dtype=np.float32)  # cosine 0 → reject
+
+    def _ctrl(self, embedding, window_ms=2000, threshold=0.3):
+        ctrl = make_ctrl()
+        ctrl.state = TalkbackState.LISTENING
+        ctrl._primary_embedding = self.PRIMARY
+        ctrl._embedder.extract = MagicMock(return_value=embedding)
+        ctrl._talkback_config = {"turn_gate": {
+            "require_speaker_match": True, "speaker_threshold": threshold,
+            "verify_window_ms": window_ms}}
+        return ctrl
+
+    @pytest.mark.asyncio
+    async def test_subwindow_turns_accumulate_then_verify_once(self):
+        """Three 800ms primary turns: first two pending, the third fills the
+        2000ms window → ECAPA runs ONCE on the concatenation and accepts."""
+        ctrl = self._ctrl(self.PRIMARY.copy())
+
+        assert await ctrl._passes_turn_gate(make_segment(800.0)) is True
+        assert await ctrl._passes_turn_gate(make_segment(800.0)) is True
+        ctrl._embedder.extract.assert_not_called()        # 1600ms < window
+
+        assert await ctrl._passes_turn_gate(make_segment(800.0)) is True
+        ctrl._embedder.extract.assert_called_once()       # window full → scored
+        # Scored on the full accumulated audio (~2400ms == 3 * 12800 samples).
+        scored_audio = ctrl._embedder.extract.call_args[0][0]
+        assert len(scored_audio) == 3 * int(800.0 / 1000 * 16000)
+
+        events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+        assert events.count("turn_gate_pending") == 2
+        assert events.count("turn_gate") == 1
+
+    @pytest.mark.asyncio
+    async def test_window_rejects_stranger_after_accumulation(self):
+        """A bystander's sub-window turns are served provisionally, but once the
+        window fills the accumulated audio is scored and rejected."""
+        ctrl = self._ctrl(self.STRANGER)
+
+        assert await ctrl._passes_turn_gate(make_segment(800.0)) is True   # pending
+        assert await ctrl._passes_turn_gate(make_segment(800.0)) is True   # pending
+        assert await ctrl._passes_turn_gate(make_segment(800.0)) is False  # window → reject
+
+    @pytest.mark.asyncio
+    async def test_buffer_resets_after_each_window(self):
+        """After a window is scored the buffer clears, so the next window
+        accumulates fresh rather than re-scoring stale audio."""
+        ctrl = self._ctrl(self.PRIMARY.copy())
+
+        await ctrl._passes_turn_gate(make_segment(2500.0))   # fills + scores window
+        assert ctrl._gate_audio_ms == 0.0
+        assert ctrl._gate_audio == []
+
+    @pytest.mark.asyncio
+    async def test_single_long_turn_scored_immediately(self):
+        """A turn already >= window is scored on its own, no accumulation wait."""
+        ctrl = self._ctrl(self.PRIMARY.copy())
+        assert await ctrl._passes_turn_gate(make_segment(2200.0)) is True
+        ctrl._embedder.extract.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # TestSpeakerLockout — end the session on sustained verified mismatch
 # ---------------------------------------------------------------------------
 
@@ -261,7 +338,7 @@ class TestSpeakerLockout:
         ctrl._primary_embedding = self.PRIMARY
         ctrl._talkback_config = {"turn_gate": {
             "require_speaker_match": True, "speaker_threshold": threshold,
-            "min_verify_ms": 2000}}
+            "verify_window_ms": 2000}}
         ctrl._gate_smoother = DecisionSmoother(window, min_matches, threshold)
         ctrl._gate_scored = 0
         return ctrl

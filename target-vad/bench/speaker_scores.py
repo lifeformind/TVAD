@@ -39,7 +39,7 @@ from typing import Iterable, Iterator, Optional
 
 DEFAULT_GLOB = "logs/kiosk-*.jsonl"
 # thresholds used when the event payload doesn't carry one
-DEFAULT_THRESHOLDS = {"turn_gate": 0.50, "barge_in": 0.75, "primary_match": 0.50}
+DEFAULT_THRESHOLDS = {"turn_gate": 0.30, "barge_in": 0.75, "primary_match": 0.50}
 
 
 @dataclass

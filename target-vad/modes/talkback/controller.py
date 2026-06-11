@@ -80,10 +80,15 @@ class TalkbackController:
         self._dump_dir = os.environ.get("TVAD_DEBUG_AUDIO_DIR")
         self._dump_n = 0
         self._session_id = ""
-        # M-of-N speaker lockout: a sliding window over VERIFIED turn scores.
+        # M-of-N speaker lockout: a sliding window over VERIFIED window scores.
         # Sustained mismatch (a hijacker) ends the session. Set in _run_async.
         self._gate_smoother: Optional[DecisionSmoother] = None
         self._gate_scored = 0
+        # Rolling verification window: consecutive LISTENING turn audio
+        # accumulates here until it reaches verify_window_ms, then it's embedded
+        # and scored as one (ECAPA is unreliable below ~2s). See _passes_turn_gate.
+        self._gate_audio: list = []
+        self._gate_audio_ms = 0.0
 
     def _emit(self, event: str, payload: dict) -> None:
         self._logger.log(event, payload)
@@ -140,16 +145,18 @@ class TalkbackController:
         silence_timeout = config.get("silence_timeout_s", 10.0)
         hard_timeout = config.get("hard_timeout_s", 300.0)
 
-        # Per-session speaker lockout over verified turn scores.
+        # Per-session speaker lockout over verified window scores.
         gate_cfg = config.get("turn_gate", {})
         lockout_cfg = gate_cfg.get("lockout", {})
         self._gate_scored = 0
         self._gate_smoother = None
+        self._gate_audio = []
+        self._gate_audio_ms = 0.0
         if lockout_cfg.get("enabled", True):
             self._gate_smoother = DecisionSmoother(
                 window_size=lockout_cfg.get("window_size", 3),
                 min_matches=lockout_cfg.get("min_matches", 1),
-                threshold=gate_cfg.get("speaker_threshold", 0.2),
+                threshold=gate_cfg.get("speaker_threshold", 0.3),
             )
 
         aec_cfg = config.get("aec", {})
@@ -338,50 +345,62 @@ class TalkbackController:
             raise
 
     async def _passes_turn_gate(self, segment) -> bool:
-        """Speaker-lock a NEW turn (LISTENING state) to the enrolled primary.
+        """Speaker-lock NEW turns (LISTENING state) to the enrolled primary.
 
-        The session is locked to whoever passed the kiosk primary-lock; every
-        subsequent turn must match that voice, else a bystander is served
-        between TTS replies. This runs in clean conditions (no TTS playing), so
-        a moderate threshold suffices — lower than barge-in's, which fights echo.
+        ECAPA cosine on a single conversational turn (~0.3-1.5s) can't separate
+        the enrolled speaker from a bystander — scores scatter for both. So we
+        don't judge turns in isolation: consecutive turn audio accumulates into
+        a rolling buffer, and once it reaches verify_window_ms (~2s, where ECAPA
+        IS reliable) the whole window is embedded and scored at once. See
+        docs/speaker-gate-measurement.md.
 
-        Returns True when the turn is allowed: gate disabled, no primary
-        enrolled, segment too short to score, or score >= threshold.
+        Sub-window turns are accepted provisionally (served now, their audio fed
+        into the next window) so the real speaker is never false-rejected for
+        speaking briefly. A bystander's brief turns leak until the window fills,
+        then the window rejects and the M-of-N lockout ends the session.
         """
         gate_cfg = self._talkback_config.get("turn_gate", {})
         if not gate_cfg.get("require_speaker_match", True):
             return True
         if self._primary_embedding is None or self._embedder is None:
             return True
-        # ECAPA can't verify short turns (self-similarity ~0.29 at 1s, often
-        # negative); accept them rather than reject the real speaker. Substantial
-        # turns (>= min_verify_ms) still get gated, which covers the bystander
-        # case. See docs/speaker-gate-measurement.md.
-        if segment.duration_ms < gate_cfg.get("min_verify_ms", 2000):
-            self._emit("turn_gate_skipped", {
-                "duration_ms": float(segment.duration_ms),
-                "reason": "too_short_to_verify",
+
+        self._gate_audio.append(segment.audio)
+        self._gate_audio_ms += float(segment.duration_ms)
+        window_ms = gate_cfg.get("verify_window_ms", 2000)
+
+        # Not enough accumulated audio to embed reliably yet — serve the turn
+        # provisionally; it still counts toward the next window's judgment.
+        if self._gate_audio_ms < window_ms:
+            self._emit("turn_gate_pending", {
+                "accumulated_ms": self._gate_audio_ms,
+                "window_ms": float(window_ms),
             })
             return True
 
+        window_audio = np.concatenate(self._gate_audio)
+        window_audio_ms = self._gate_audio_ms
+        self._gate_audio = []
+        self._gate_audio_ms = 0.0
+
         loop = asyncio.get_event_loop()
         embedding = await loop.run_in_executor(
-            None, self._embedder.extract, segment.audio
+            None, self._embedder.extract, window_audio
         )
         score = float(cosine_similarity(embedding, self._primary_embedding))
-        threshold = gate_cfg.get("speaker_threshold", 0.5)
+        threshold = gate_cfg.get("speaker_threshold", 0.3)
         decision = "accept" if score >= threshold else "reject"
         self._dump_n += 1
-        self._dump_wav(segment.audio, f"turn{self._dump_n:02d}_{score:.2f}")
+        self._dump_wav(window_audio, f"win{self._dump_n:02d}_{score:.2f}")
         self._emit("turn_gate", {
             "score": score, "threshold": threshold, "decision": decision,
-            "duration_ms": float(segment.duration_ms),
+            "duration_ms": window_audio_ms,
         })
 
-        # M-of-N lockout: feed every verified score into the window. Once the
-        # window is full, a sustained mismatch (smoother no longer sees
-        # min_matches accepts) means a different speaker has taken over — end
-        # the session instead of letting them chip through one slip at a time.
+        # M-of-N lockout: feed every verified window score into the window. Once
+        # it is full, a sustained mismatch (smoother no longer sees min_matches
+        # accepts) means a different speaker has taken over — end the session
+        # instead of letting them chip through one slip at a time.
         if self._gate_smoother is not None:
             matched = self._gate_smoother.update(score)
             self._gate_scored += 1
