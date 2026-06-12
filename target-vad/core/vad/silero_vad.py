@@ -62,6 +62,15 @@ class SileroVAD:
         )
         self._pre_speech_buffer = np.array([], dtype=np.float32)
 
+    @property
+    def is_speaking(self) -> bool:
+        """True while inside a speech run (between onset and the next silence).
+
+        Lets the caller react at speech onset — e.g. duck TTS the moment someone
+        starts talking — rather than waiting for the endpointed segment.
+        """
+        return self._is_speaking
+
     def is_speech(self, chunk: np.ndarray) -> float:
         """Return speech probability (0.0-1.0) for a chunk of audio.
 

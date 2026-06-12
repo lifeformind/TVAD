@@ -89,6 +89,28 @@ class TalkbackController:
         # and scored as one (ECAPA is unreliable below ~2s). See _passes_turn_gate.
         self._gate_audio: list = []
         self._gate_audio_ms = 0.0
+        # Streaming playback: TTS audio is written frame-by-frame to a persistent
+        # output stream so each played (post-gain) frame can be recorded as the
+        # AEC reference (without this, AEC cancels against silence — a no-op).
+        # _gain scales output for barge-in ducking; _playback_cancelled cuts the
+        # in-flight utterance. Set up in _run_async.
+        self._out_stream = None
+        self._gain = 1.0
+        self._playback_cancelled = False
+        # Barge-in ducking/proximity, configured in _run_async from barge_in cfg.
+        self._barge_duck_enabled = False
+        self._duck_level = 0.15
+        self._proximity_rms = 0.0
+        self._ducked = False
+        # Interruption-resume state, set when a verified barge-in cuts an
+        # in-progress answer. None when no resume is pending. _partial_response
+        # tracks the answer text spoken so far (for the resume reference);
+        # _current_query is the request being answered; _pending_steer is a
+        # one-shot system instruction injected into the next LLM generation.
+        self._interrupted: Optional[dict] = None
+        self._partial_response = ""
+        self._current_query = ""
+        self._pending_steer: Optional[str] = None
 
     def _emit(self, event: str, payload: dict) -> None:
         self._logger.log(event, payload)
@@ -116,6 +138,31 @@ class TalkbackController:
                 w.writeframes(pcm.tobytes())
         except Exception:
             pass
+
+    # 30ms playback frames: small enough for ~30ms duck latency, large enough
+    # to keep output-stream writes cheap.
+    PLAYBACK_FRAME_SAMPLES = 480
+
+    def _play_audio(self, audio: np.ndarray) -> None:
+        """Write one utterance to the output stream frame-by-frame (blocking).
+
+        Runs in an executor. Applies the current gain (for barge-in ducking),
+        records each played frame as the AEC reference, and bails immediately if
+        the utterance is cut (barge-in) or the session ends.
+        """
+        if self._out_stream is None or len(audio) == 0:
+            return
+        frame = self.PLAYBACK_FRAME_SAMPLES
+        for i in range(0, len(audio), frame):
+            if not self._running or self._playback_cancelled:
+                break
+            gained = (audio[i:i + frame] * self._gain).astype(np.float32)
+            if self._player is not None:
+                self._player.record_reference(gained)
+            try:
+                self._out_stream.write(gained)
+            except Exception:
+                break
 
     def run(self, handoff: TalkbackHandoff) -> TalkbackResult:
         loop = asyncio.new_event_loop()
@@ -171,6 +218,46 @@ class TalkbackController:
         else:
             self._aec = None
 
+        # Persistent output stream: playback writes frames here so each played
+        # frame becomes the AEC reference and gain (ducking) can change mid-reply.
+        self._gain = 1.0
+        self._ducked = False
+        self._playback_cancelled = False
+        self._interrupted = None
+        self._partial_response = ""
+        self._current_query = ""
+        self._pending_steer = None
+        sr = config.get("sample_rate_hz", 16000)
+        self._out_stream = None
+        try:
+            self._out_stream = sd.OutputStream(
+                samplerate=sr, channels=1, dtype="float32",
+                device=config.get("output_device"),
+            )
+            self._out_stream.start()
+        except Exception:
+            self._out_stream = None
+
+        # Barge-in ducking + proximity pre-gate.
+        barge_cfg = config.get("barge_in", {})
+        prox_cfg = barge_cfg.get("proximity", {})
+        self._duck_level = barge_cfg.get("duck_level", 0.15)
+        self._barge_duck_enabled = (
+            barge_cfg.get("enabled", True) and prox_cfg.get("enabled", True)
+        )
+        # Ignore speech too quiet to be someone AT the kiosk. Auto-calibrate the
+        # RMS floor from the primary enrollment segment (the user is at the
+        # kiosk) unless an explicit threshold is configured.
+        thr = prox_cfg.get("rms_threshold")
+        if thr is None:
+            first = handoff.first_segment
+            primary_rms = (
+                float(np.sqrt(np.mean(np.square(first.audio))))
+                if first is not None and len(first.audio) else 0.0
+            )
+            thr = primary_rms * prox_cfg.get("rms_factor", 0.5)
+        self._proximity_rms = thr
+
         self._conversation = ConversationManager(
             system_prompt=config.get("llm", {}).get(
                 "system_prompt", "You are a concise voice assistant.",
@@ -206,6 +293,7 @@ class TalkbackController:
             self._last_speech_at = time.monotonic()
             self._emit("user_turn_complete", {"text": first_text, "turn_number": 1})
             conversation.add_user_turn(first_text)
+            self._current_query = first_text
             self._transition(TalkbackState.SPEAKING)
             self._emit("turn_started", {"turn_number": 1})
             response_task = asyncio.create_task(
@@ -261,6 +349,13 @@ class TalkbackController:
                 except asyncio.CancelledError:
                     pass
             await watchdog.stop()
+            if self._out_stream is not None:
+                try:
+                    self._out_stream.stop()
+                    self._out_stream.close()
+                except Exception:
+                    pass
+                self._out_stream = None
 
         await self._llm.close()
 
@@ -284,6 +379,11 @@ class TalkbackController:
         self, conversation: ConversationManager, config: dict
     ) -> str:
         messages = conversation.get_messages()
+        # One-shot steering (interruption answer / resume continuation): a
+        # transient system note appended for THIS generation only.
+        if self._pending_steer:
+            messages = messages + [{"role": "system", "content": self._pending_steer}]
+            self._pending_steer = None
         self._emit("llm_request_sent", {
             "messages_count": len(messages),
             "model": config.get("llm", {}).get("model", "unknown"),
@@ -293,6 +393,12 @@ class TalkbackController:
             max_chunk_chars=config.get("chunker", {}).get("max_chunk_chars", 120),
         )
 
+        # New answer starts at full volume and not cut.
+        self._playback_cancelled = False
+        self._gain = 1.0
+        self._ducked = False
+        self._partial_response = ""
+
         full_response = []
         t0 = time.monotonic()
         first_token = True
@@ -301,6 +407,7 @@ class TalkbackController:
             if not self._running:
                 break
             full_response.append(token)
+            self._partial_response = "".join(full_response)
             if first_token:
                 self._emit("llm_response_started", {
                     "time_to_first_token_ms": (time.monotonic() - t0) * 1000,
@@ -311,18 +418,16 @@ class TalkbackController:
             if chunk:
                 audio = await self._tts.synthesize(chunk)
                 if len(audio) > 0:
-                    await self._player.enqueue(audio)
                     await asyncio.get_event_loop().run_in_executor(
-                        None, lambda a=audio: sd.play(a, samplerate=16000, blocking=True)
+                        None, self._play_audio, audio
                     )
 
         remaining = chunker.flush()
         if remaining:
             audio = await self._tts.synthesize(remaining)
             if len(audio) > 0:
-                await self._player.enqueue(audio)
                 await asyncio.get_event_loop().run_in_executor(
-                    None, lambda a=audio: sd.play(a, samplerate=16000, blocking=True)
+                    None, self._play_audio, audio
                 )
 
         response_text = "".join(full_response)
@@ -439,6 +544,9 @@ class TalkbackController:
             turn = self._conversation.turn_count + 1
             self._emit("user_turn_complete", {"text": text, "turn_number": turn})
             self._conversation.add_user_turn(text)
+            self._current_query = text
+            # If we owe the user a resume offer, steer this reply to continue it.
+            self._maybe_inject_resume_steer()
             self._transition(TalkbackState.SPEAKING)
             self._emit("turn_started", {"turn_number": turn})
             task = asyncio.create_task(
@@ -454,14 +562,39 @@ class TalkbackController:
             if segment.duration_ms < barge_cfg.get("min_speech_ms", 120):
                 return None
 
+            # Proximity pre-gate: in a crowd, ignore speech too quiet to be
+            # someone AT the kiosk (we may have ducked at onset — restore).
+            if self._barge_duck_enabled and self._proximity_rms > 0.0:
+                rms = (
+                    float(np.sqrt(np.mean(np.square(segment.audio))))
+                    if len(segment.audio) else 0.0
+                )
+                if rms < self._proximity_rms:
+                    self._restore_volume()
+                    self._emit("barge_in_ignored_far", {
+                        "rms": rms, "threshold": self._proximity_rms,
+                    })
+                    return None
+
+            # ECAPA can't verify a short interruption (see turn_gate); don't cut
+            # the AI for un-verifiable audio — crowd-safe default.
+            if segment.duration_ms < barge_cfg.get("verify_window_ms", 1200):
+                self._restore_volume()
+                self._emit("barge_in_rejected", {
+                    "reason": "too_short_to_verify",
+                    "duration_ms": float(segment.duration_ms),
+                })
+                return None
+
             if barge_cfg.get("require_speaker_match", True):
                 loop = asyncio.get_event_loop()
                 embedding = await loop.run_in_executor(
                     None, self._embedder.extract, segment.audio
                 )
                 score = cosine_similarity(embedding, self._primary_embedding)
-                threshold = barge_cfg.get("speaker_threshold", 0.5)
+                threshold = barge_cfg.get("speaker_threshold", 0.3)
                 if score < threshold:
+                    self._restore_volume()
                     self._emit("barge_in_rejected", {
                         "score": float(score), "threshold": threshold,
                     })
@@ -469,7 +602,8 @@ class TalkbackController:
             else:
                 score = 1.0
 
-            # Cancel current response
+            # Verified registered user — CUT the in-flight reply.
+            self._playback_cancelled = True
             if self._response_task and not self._response_task.done():
                 self._response_task.cancel()
                 try:
@@ -477,8 +611,12 @@ class TalkbackController:
                 except asyncio.CancelledError:
                     pass
 
-            sd.stop()
-            self._handle_barge_in(primary_score=float(score), speech_ms=segment.duration_ms)
+            self._handle_barge_in(
+                primary_score=float(score), speech_ms=segment.duration_ms
+            )
+
+            # Remember the interrupted answer so we can offer to resume it.
+            self._store_interruption()
 
             # Transcribe barge-in speech and start new response
             text = await self._stt.transcribe_segment(segment.audio)
@@ -486,9 +624,12 @@ class TalkbackController:
                 self._transition(TalkbackState.LISTENING)
                 return None
 
+            self._gain = 1.0
+            self._ducked = False
             turn = self._conversation.turn_count + 1
             self._emit("user_turn_complete", {"text": text, "turn_number": turn})
             self._conversation.add_user_turn(text)
+            self._current_query = text
             self._transition(TalkbackState.SPEAKING)
             self._emit("turn_started", {"turn_number": turn})
             task = asyncio.create_task(
@@ -498,6 +639,58 @@ class TalkbackController:
             return task
 
         return None
+
+    def _restore_volume(self) -> None:
+        """Un-duck: return TTS to full volume after a non-cut interruption."""
+        if self._ducked or self._gain != 1.0:
+            self._gain = 1.0
+            self._ducked = False
+            self._emit("barge_in_restored", {})
+
+    def _store_interruption(self) -> None:
+        """Remember the answer that was cut off so we can offer to resume it.
+
+        Captures the request being answered + the partial answer, preserves the
+        partial in history (marked interrupted), and queues a steer so the
+        upcoming reply answers the interjection and then offers to continue.
+        """
+        if not self._talkback_config.get("resume", {}).get("enabled", True):
+            return
+        query = (self._current_query or "").strip()
+        partial = (self._partial_response or "").strip()
+        if not query:
+            return
+        if partial and self._conversation is not None:
+            self._conversation.add_assistant_turn(partial + " [interrupted]")
+        self._interrupted = {"query": query, "partial": partial}
+        self._pending_steer = (
+            f'You were answering the user\'s request: "{query}". So far you had '
+            f'said: "{partial}". The user interrupted with a new question. Answer '
+            f'their new question briefly, then ask if they would like you to '
+            f'continue with the earlier topic.'
+        )
+        self._emit("interruption_stored",
+                   {"query": query, "partial_chars": len(partial)})
+        self._emit("resume_pending", {})
+
+    def _maybe_inject_resume_steer(self) -> None:
+        """If a resume is pending, steer the next reply to continue (or drop) it.
+
+        The LLM interprets the user's reply (yes/no) and either resumes the
+        earlier explanation naturally or just answers normally. One-shot.
+        """
+        if self._interrupted is None:
+            return
+        query = self._interrupted["query"]
+        partial = self._interrupted["partial"]
+        self._pending_steer = (
+            f'Earlier you offered to continue explaining "{query}" (you had '
+            f'said: "{partial}"). Interpret the user\'s latest reply: if they '
+            f'want you to continue, resume that explanation naturally (e.g. "As '
+            f'I was saying...") and finish it; otherwise just respond normally.'
+        )
+        self._interrupted = None
+        self._emit("resume_continued", {"query": query})
 
     async def _listen_loop(
         self,
@@ -536,6 +729,22 @@ class TalkbackController:
                     chunk = np.concatenate(cleaned_frames)
 
             segments = vad.process_chunk(chunk)
+
+            # Duck at speech onset (before the segment endpoints) so the
+            # interruption is captured at low echo and can be verified. Only for
+            # near-field speech — distant crowd chatter never ducks the AI.
+            if (self.state == TalkbackState.SPEAKING
+                    and self._barge_duck_enabled
+                    and not self._ducked
+                    and getattr(vad, "is_speaking", False) is True):
+                rms = (
+                    float(np.sqrt(np.mean(np.square(chunk)))) if len(chunk) else 0.0
+                )
+                if rms >= self._proximity_rms:
+                    self._gain = self._duck_level
+                    self._ducked = True
+                    self._emit("barge_in_ducked", {"rms": rms})
+
             for seg in segments:
                 self._last_speech_at = time.monotonic()
                 await self._segment_queue.put(seg)

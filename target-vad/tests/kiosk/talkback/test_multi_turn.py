@@ -404,6 +404,7 @@ class TestHandleSegmentSpeaking:
                 "min_speech_ms": 120,
                 "require_speaker_match": True,
                 "speaker_threshold": 0.5,
+                "verify_window_ms": 1200,
             }
         }
 
@@ -416,7 +417,8 @@ class TestHandleSegmentSpeaking:
         dummy_task = asyncio.create_task(asyncio.sleep(100))
         ctrl._response_task = dummy_task
 
-        segment = make_segment(500.0)
+        # >= verify_window_ms so the interruption is long enough to verify.
+        segment = make_segment(1500.0)
 
         with patch("modes.talkback.controller.sd"):
             new_task = await ctrl._handle_segment(segment)
@@ -452,6 +454,7 @@ class TestHandleSegmentSpeaking:
                 "min_speech_ms": 120,
                 "require_speaker_match": True,
                 "speaker_threshold": 0.5,
+                "verify_window_ms": 1200,
             }
         }
 
@@ -459,7 +462,7 @@ class TestHandleSegmentSpeaking:
         # Set up a pending response task to clean up later
         ctrl._response_task = asyncio.create_task(asyncio.sleep(100))
 
-        segment = make_segment(500.0)
+        segment = make_segment(1500.0)
 
         try:
             with patch("modes.talkback.controller.sd"):
@@ -508,3 +511,89 @@ class TestHandleSegmentSpeaking:
                     await ctrl._response_task
                 except asyncio.CancelledError:
                     pass
+
+
+# ---------------------------------------------------------------------------
+# TestBargeInGate — proximity pre-gate + verify-window + duck/restore
+# ---------------------------------------------------------------------------
+
+def make_segment_amp(duration_ms: float, amplitude: float) -> SpeechSegment:
+    samples = int(duration_ms / 1000 * 16000)
+    return SpeechSegment(
+        audio=np.full(samples, amplitude, dtype=np.float32),
+        start_ms=0.0, end_ms=duration_ms, duration_ms=duration_ms,
+    )
+
+
+class TestBargeInGate:
+    PRIMARY = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    STRANGER = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+
+    def _ctrl(self, emb, *, threshold=0.3, verify_window_ms=1200):
+        ctrl = make_ctrl()
+        ctrl.state = TalkbackState.SPEAKING
+        ctrl._primary_embedding = self.PRIMARY
+        ctrl._embedder.extract = MagicMock(return_value=emb)
+        ctrl._stt.transcribe_segment = AsyncMock(return_value="interrupt")
+        ctrl._generate_response = AsyncMock(return_value="resp")
+        ctrl._talkback_config = {"barge_in": {
+            "enabled": True, "min_speech_ms": 120, "require_speaker_match": True,
+            "speaker_threshold": threshold, "verify_window_ms": verify_window_ms,
+        }}
+        return ctrl
+
+    @pytest.mark.asyncio
+    async def test_too_short_to_verify_does_not_cut(self):
+        """A sub-verify_window interruption can't be verified → never cuts."""
+        ctrl = self._ctrl(self.PRIMARY.copy())
+        with patch("modes.talkback.controller.sd"):
+            result = await ctrl._handle_segment(make_segment(600.0))
+        assert result is None
+        assert ctrl.state == TalkbackState.SPEAKING
+        events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+        assert "barge_in" not in events
+
+    @pytest.mark.asyncio
+    async def test_far_speech_ignored_by_proximity(self):
+        """Speech too quiet to be at the kiosk is ignored before verification."""
+        ctrl = self._ctrl(self.PRIMARY.copy())
+        ctrl._barge_duck_enabled = True
+        ctrl._proximity_rms = 0.05
+        with patch("modes.talkback.controller.sd"):
+            result = await ctrl._handle_segment(make_segment_amp(1500.0, 0.01))
+        assert result is None
+        ctrl._embedder.extract.assert_not_called()       # never even verified
+        events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+        assert "barge_in_ignored_far" in events
+
+    @pytest.mark.asyncio
+    async def test_verified_user_cuts_playback(self):
+        ctrl = self._ctrl(self.PRIMARY.copy())
+        ctrl._playback_cancelled = False
+        ctrl._response_task = asyncio.create_task(asyncio.sleep(100))
+        with patch("modes.talkback.controller.sd"):
+            task = await ctrl._handle_segment(make_segment(1500.0))
+        try:
+            assert task is not None
+            assert ctrl._playback_cancelled is True
+        finally:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_reject_restores_volume(self):
+        """A ducked, then rejected, interruption restores full volume."""
+        ctrl = self._ctrl(self.STRANGER)
+        ctrl._gain = 0.15
+        ctrl._ducked = True
+        with patch("modes.talkback.controller.sd"):
+            result = await ctrl._handle_segment(make_segment(1500.0))
+        assert result is None
+        assert ctrl._gain == 1.0
+        assert ctrl._ducked is False
+        events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+        assert "barge_in_rejected" in events

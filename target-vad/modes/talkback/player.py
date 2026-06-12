@@ -58,6 +58,15 @@ class Player:
             self._record_to_ring_buffer(frame)
         return frame
 
+    def record_reference(self, audio: np.ndarray) -> None:
+        """Record an actually-played (post-gain) frame as the AEC reference.
+
+        The playback loop calls this with each frame as it goes to the output
+        device, so get_reference_frame() returns what the mic is actually
+        hearing — which is what makes AEC cancel real echo.
+        """
+        self._record_to_ring_buffer(audio)
+
     def _record_to_ring_buffer(self, audio: np.ndarray) -> None:
         with self._ring_lock:
             n = len(audio)

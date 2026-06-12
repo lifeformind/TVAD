@@ -113,11 +113,35 @@ kiosk:
         window_size: 3
         min_matches: 1
 
+    # Barge-in: the registered user (session primary) can interrupt the AI
+    # mid-reply; all other speakers and crowd noise are ignored. Verification
+    # needs low echo, so on near-field speech onset we DUCK the TTS, capture a
+    # clean window, verify, then CUT (user) or RESTORE (bystander/noise).
+    #
+    # speaker_threshold is provisional: prior barge-in scores were collected
+    # with AEC effectively off (playback bypassed the player's reference ring
+    # buffer, so AEC cancelled against silence — 0/159 barge-ins ever succeeded).
+    # That is fixed; re-measure during ducked playback and retune:
+    #   bench/speaker_scores.py --source barge_in
     barge_in:
       enabled: true
       require_speaker_match: true
       min_speech_ms: 120
-      speaker_threshold: 0.75
+      speaker_threshold: 0.30      # provisional; re-measure during ducked playback
+      verify_window_ms: 1200       # don't cut for un-verifiable short speech (crowd-safe)
+      duck_level: 0.15             # TTS gain while capturing an interruption
+      duck_ramp_ms: 120
+      proximity:
+        enabled: true              # ignore speech too quiet to be someone at the kiosk
+        rms_threshold: null        # null = auto-calibrate from the primary enrollment RMS
+        rms_factor: 0.5
+
+    # Interruption-resume: after answering an interruption, the AI offers to
+    # continue the prior topic and, on confirmation, resumes from where it left
+    # off. Controller owns the resume lifecycle; the LLM phrases the offer and
+    # continuation. See docs/superpowers/specs/2026-06-12-verified-bargein-resume-design.md
+    resume:
+      enabled: true
 
     logging:
       jsonl_path: "logs/kiosk-{date}-{session_id}.jsonl"
