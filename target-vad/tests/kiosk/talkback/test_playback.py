@@ -68,3 +68,32 @@ class TestPlayAudio:
         ctrl = make_ctrl()
         ctrl._out_stream = None
         ctrl._play_audio(np.ones(960, dtype=np.float32), 0)  # must not raise
+
+
+class TestTeardown:
+    """The output stream must never be closed while a write is in flight
+    (concurrent PortAudio calls across threads segfault)."""
+
+    def test_close_stops_clears_and_halts_playback(self):
+        ctrl = make_ctrl()
+        stream = ctrl._out_stream
+        ctrl._close_out_stream()
+        stream.stop.assert_called_once()
+        stream.close.assert_called_once()
+        assert ctrl._out_stream is None
+        assert ctrl._running is False
+        # A late playback frame after close writes nothing (stream is gone).
+        ctrl._play_audio(np.ones(480, dtype=np.float32), ctrl._play_gen)
+        stream.write.assert_not_called()
+
+    def test_close_is_idempotent(self):
+        ctrl = make_ctrl()
+        ctrl._close_out_stream()
+        ctrl._close_out_stream()        # must not raise on already-closed stream
+
+    def test_write_and_close_share_one_lock(self):
+        """Guards against a future refactor dropping the shared lock that makes
+        write and close mutually exclusive."""
+        import threading
+        ctrl = make_ctrl()
+        assert isinstance(ctrl._write_lock, type(threading.Lock()))

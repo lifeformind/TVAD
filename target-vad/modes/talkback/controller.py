@@ -7,6 +7,7 @@ Called by KioskPipeline.run() via TalkbackHandoff; returns TalkbackResult.
 import asyncio
 import enum
 import os
+import threading
 import time
 import uuid
 import wave
@@ -103,6 +104,12 @@ class TalkbackController:
         # never touch the (non-thread-safe) output stream concurrently.
         self._play_gen = 0
         self._play_future = None
+        # Held around every output-stream write AND around stream close, so the
+        # stream is never closed (nor the session torn down) while a write is in
+        # flight — concurrent PortAudio calls across threads segfault. This is
+        # the interrupt-safe backstop: it works even when a KeyboardInterrupt
+        # kills the event loop before the async drain can run.
+        self._write_lock = threading.Lock()
         # Barge-in ducking/proximity, configured in _run_async from barge_in cfg.
         self._barge_duck_enabled = False
         self._proximity_enabled = False
@@ -151,16 +158,35 @@ class TalkbackController:
     PLAYBACK_FRAME_SAMPLES = 480
 
     async def _speak(self, audio: np.ndarray) -> None:
-        """Play one utterance in an executor, tracking the job so a barge-in can
-        wait for it to finish before the next response writes the stream."""
+        """Play one utterance in an executor, tracking the job so a barge-in or
+        shutdown can wait for it to finish before the stream is touched again.
+
+        _play_future is intentionally NOT cleared on cancellation: cancelling the
+        await does not stop the executor thread (run_in_executor jobs can't be
+        cancelled once running), so the reference must survive for _drain_playback
+        to await the thread's real completion before any stream teardown.
+        """
         gen = self._play_gen
         self._play_future = asyncio.get_event_loop().run_in_executor(
             None, self._play_audio, audio, gen
         )
-        try:
-            await self._play_future
-        finally:
-            self._play_future = None
+        await self._play_future
+
+    async def _drain_playback(self) -> None:
+        """Stop in-flight playback and wait for the write thread to exit.
+
+        Bumping the generation makes _play_audio break at its next frame; then we
+        wait for the executor thread to actually return, so no sd.write is running
+        when the output stream is closed or the mic stream is stopped (concurrent
+        PortAudio calls across threads segfault).
+        """
+        self._play_gen += 1
+        fut = self._play_future
+        if fut is not None:
+            try:
+                await asyncio.shield(fut)
+            except Exception:
+                pass
 
     def _play_audio(self, audio: np.ndarray, gen: int) -> None:
         """Write one utterance to the output stream frame-by-frame (blocking).
@@ -176,18 +202,42 @@ class TalkbackController:
             if not self._running or gen != self._play_gen:
                 break
             gained = (audio[i:i + frame] * self._gain).astype(np.float32)
-            if self._player is not None:
-                self._player.record_reference(gained)
-            try:
-                self._out_stream.write(gained)
-            except Exception:
-                break
+            # The lock makes write and close mutually exclusive; re-check the
+            # stream inside it since teardown may have closed it while we waited.
+            with self._write_lock:
+                if self._out_stream is None or gen != self._play_gen:
+                    break
+                if self._player is not None:
+                    self._player.record_reference(gained)
+                try:
+                    self._out_stream.write(gained)
+                except Exception:
+                    break
+
+    def _close_out_stream(self) -> None:
+        """Stop playback and close the output stream — synchronous and lock-
+        guarded so it's safe even when a KeyboardInterrupt has killed the event
+        loop (the async drain can't run then). Idempotent."""
+        self._running = False
+        self._play_gen += 1
+        with self._write_lock:
+            if self._out_stream is not None:
+                try:
+                    self._out_stream.stop()
+                    self._out_stream.close()
+                except Exception:
+                    pass
+                self._out_stream = None
 
     def run(self, handoff: TalkbackHandoff) -> TalkbackResult:
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(self._run_async(handoff))
         finally:
+            # Interrupt-safe backstop: if KeyboardInterrupt unwound the loop, the
+            # async finally may not have run — make sure no playback thread is
+            # still writing the (about-to-be-torn-down) audio device.
+            self._close_out_stream()
             loop.close()
 
     async def _run_async(self, handoff: TalkbackHandoff) -> TalkbackResult:
@@ -369,14 +419,12 @@ class TalkbackController:
                     await response_task
                 except asyncio.CancelledError:
                     pass
+            # Wait for any in-flight playback write to finish BEFORE closing the
+            # output stream (and before the pipeline stops the mic on return) —
+            # concurrent PortAudio calls across threads segfault.
+            await self._drain_playback()
             await watchdog.stop()
-            if self._out_stream is not None:
-                try:
-                    self._out_stream.stop()
-                    self._out_stream.close()
-                except Exception:
-                    pass
-                self._out_stream = None
+            self._close_out_stream()
 
         await self._llm.close()
 
@@ -632,23 +680,15 @@ class TalkbackController:
             else:
                 score = 1.0
 
-            # Verified registered user — CUT the in-flight reply. Bumping the
-            # generation makes the in-flight playback stop at its next frame;
-            # then we wait for that write thread to actually finish before the
-            # new response starts, so two threads never write the (non-thread-
-            # safe) output stream at once.
-            self._play_gen += 1
-            old_play = self._play_future
+            # Verified registered user — CUT the in-flight reply. Stop the old
+            # playback thread and wait for it to exit before the new response
+            # writes the stream, so two threads never touch it at once.
+            await self._drain_playback()
             if self._response_task and not self._response_task.done():
                 self._response_task.cancel()
                 try:
                     await self._response_task
                 except asyncio.CancelledError:
-                    pass
-            if old_play is not None:
-                try:
-                    await asyncio.shield(old_play)
-                except Exception:
                     pass
 
             self._handle_barge_in(
