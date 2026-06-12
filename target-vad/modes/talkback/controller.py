@@ -92,13 +92,20 @@ class TalkbackController:
         # Streaming playback: TTS audio is written frame-by-frame to a persistent
         # output stream so each played (post-gain) frame can be recorded as the
         # AEC reference (without this, AEC cancels against silence — a no-op).
-        # _gain scales output for barge-in ducking; _playback_cancelled cuts the
-        # in-flight utterance. Set up in _run_async.
+        # _gain scales output for barge-in ducking; the generation counter
+        # (below) cuts the in-flight utterance. Set up in _run_async.
         self._out_stream = None
         self._gain = 1.0
-        self._playback_cancelled = False
+        # Playback runs one utterance at a time in an executor. _play_gen tags
+        # each response; a barge-in bumps it so an in-flight (now stale) playback
+        # stops at its next frame. _play_future is the running write job — a cut
+        # awaits it before starting the new response, so the old and new writes
+        # never touch the (non-thread-safe) output stream concurrently.
+        self._play_gen = 0
+        self._play_future = None
         # Barge-in ducking/proximity, configured in _run_async from barge_in cfg.
         self._barge_duck_enabled = False
+        self._proximity_enabled = False
         self._duck_level = 0.15
         self._proximity_rms = 0.0
         self._ducked = False
@@ -143,18 +150,30 @@ class TalkbackController:
     # to keep output-stream writes cheap.
     PLAYBACK_FRAME_SAMPLES = 480
 
-    def _play_audio(self, audio: np.ndarray) -> None:
+    async def _speak(self, audio: np.ndarray) -> None:
+        """Play one utterance in an executor, tracking the job so a barge-in can
+        wait for it to finish before the next response writes the stream."""
+        gen = self._play_gen
+        self._play_future = asyncio.get_event_loop().run_in_executor(
+            None, self._play_audio, audio, gen
+        )
+        try:
+            await self._play_future
+        finally:
+            self._play_future = None
+
+    def _play_audio(self, audio: np.ndarray, gen: int) -> None:
         """Write one utterance to the output stream frame-by-frame (blocking).
 
         Runs in an executor. Applies the current gain (for barge-in ducking),
         records each played frame as the AEC reference, and bails immediately if
-        the utterance is cut (barge-in) or the session ends.
+        a barge-in superseded this generation or the session ended.
         """
         if self._out_stream is None or len(audio) == 0:
             return
         frame = self.PLAYBACK_FRAME_SAMPLES
         for i in range(0, len(audio), frame):
-            if not self._running or self._playback_cancelled:
+            if not self._running or gen != self._play_gen:
                 break
             gained = (audio[i:i + frame] * self._gain).astype(np.float32)
             if self._player is not None:
@@ -222,7 +241,8 @@ class TalkbackController:
         # frame becomes the AEC reference and gain (ducking) can change mid-reply.
         self._gain = 1.0
         self._ducked = False
-        self._playback_cancelled = False
+        self._play_gen = 0
+        self._play_future = None
         self._interrupted = None
         self._partial_response = ""
         self._current_query = ""
@@ -242,8 +262,9 @@ class TalkbackController:
         barge_cfg = config.get("barge_in", {})
         prox_cfg = barge_cfg.get("proximity", {})
         self._duck_level = barge_cfg.get("duck_level", 0.15)
+        self._proximity_enabled = prox_cfg.get("enabled", True)
         self._barge_duck_enabled = (
-            barge_cfg.get("enabled", True) and prox_cfg.get("enabled", True)
+            barge_cfg.get("enabled", True) and self._proximity_enabled
         )
         # Ignore speech too quiet to be someone AT the kiosk. Auto-calibrate the
         # RMS floor from the primary enrollment segment (the user is at the
@@ -393,8 +414,7 @@ class TalkbackController:
             max_chunk_chars=config.get("chunker", {}).get("max_chunk_chars", 120),
         )
 
-        # New answer starts at full volume and not cut.
-        self._playback_cancelled = False
+        # New answer starts at full volume.
         self._gain = 1.0
         self._ducked = False
         self._partial_response = ""
@@ -418,17 +438,13 @@ class TalkbackController:
             if chunk:
                 audio = await self._tts.synthesize(chunk)
                 if len(audio) > 0:
-                    await asyncio.get_event_loop().run_in_executor(
-                        None, self._play_audio, audio
-                    )
+                    await self._speak(audio)
 
         remaining = chunker.flush()
         if remaining:
             audio = await self._tts.synthesize(remaining)
             if len(audio) > 0:
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self._play_audio, audio
-                )
+                await self._speak(audio)
 
         response_text = "".join(full_response)
         self._emit("llm_response_complete", {
@@ -469,6 +485,20 @@ class TalkbackController:
             return True
         if self._primary_embedding is None or self._embedder is None:
             return True
+
+        # Proximity pre-gate: a turn too quiet to be someone AT the kiosk is a
+        # bystander — ignore it rather than serve it unverified while we wait for
+        # the rolling window to fill. Closes the short-turn leak for far speakers.
+        if self._proximity_enabled and self._proximity_rms > 0.0:
+            rms = (
+                float(np.sqrt(np.mean(np.square(segment.audio))))
+                if len(segment.audio) else 0.0
+            )
+            if rms < self._proximity_rms:
+                self._emit("turn_gate_ignored_far", {
+                    "rms": rms, "threshold": self._proximity_rms,
+                })
+                return False
 
         self._gate_audio.append(segment.audio)
         self._gate_audio_ms += float(segment.duration_ms)
@@ -602,13 +632,23 @@ class TalkbackController:
             else:
                 score = 1.0
 
-            # Verified registered user — CUT the in-flight reply.
-            self._playback_cancelled = True
+            # Verified registered user — CUT the in-flight reply. Bumping the
+            # generation makes the in-flight playback stop at its next frame;
+            # then we wait for that write thread to actually finish before the
+            # new response starts, so two threads never write the (non-thread-
+            # safe) output stream at once.
+            self._play_gen += 1
+            old_play = self._play_future
             if self._response_task and not self._response_task.done():
                 self._response_task.cancel()
                 try:
                     await self._response_task
                 except asyncio.CancelledError:
+                    pass
+            if old_play is not None:
+                try:
+                    await asyncio.shield(old_play)
+                except Exception:
                     pass
 
             self._handle_barge_in(

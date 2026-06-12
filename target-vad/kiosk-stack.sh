@@ -197,7 +197,12 @@ cmd_start() {
   fi
 
   log "Launching kiosk (foreground). Ctrl-C to end the session and stop the LLM."
-  python3 kiosk.py --talkback
+  # Tee stdout+stderr to a log so a crash/segfault is captured (the kiosk runs
+  # in the foreground, so otherwise the traceback only hits the terminal).
+  # PYTHONFAULTHANDLER dumps a C-level traceback on segfault (e.g. in the AEC
+  # ctypes shim). stdbuf keeps the tee'd stream unbuffered so nothing is lost.
+  local kiosk_log="$LOG_DIR/kiosk.err.log"
+  PYTHONFAULTHANDLER=1 stdbuf -oL -eL python3 kiosk.py --talkback 2>&1 | tee "$kiosk_log"
 }
 
 usage() {

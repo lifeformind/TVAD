@@ -322,6 +322,19 @@ class TestRollingWindowGate:
         assert await ctrl._passes_turn_gate(make_segment(2200.0)) is True
         ctrl._embedder.extract.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_far_turn_ignored_by_proximity(self):
+        """A far (quiet) second speaker's turn is ignored before it can be
+        served unverified — closes the short-turn leak when they're not at the
+        kiosk."""
+        ctrl = self._ctrl(self.PRIMARY.copy())
+        ctrl._proximity_enabled = True
+        ctrl._proximity_rms = 0.05
+        assert await ctrl._passes_turn_gate(make_segment_amp(800.0, 0.01)) is False
+        ctrl._embedder.extract.assert_not_called()
+        events = [c[0][0] for c in ctrl._logger.log.call_args_list]
+        assert "turn_gate_ignored_far" in events
+
 
 # ---------------------------------------------------------------------------
 # TestSpeakerLockout — end the session on sustained verified mismatch
@@ -569,13 +582,14 @@ class TestBargeInGate:
     @pytest.mark.asyncio
     async def test_verified_user_cuts_playback(self):
         ctrl = self._ctrl(self.PRIMARY.copy())
-        ctrl._playback_cancelled = False
+        ctrl._play_gen = 0
         ctrl._response_task = asyncio.create_task(asyncio.sleep(100))
         with patch("modes.talkback.controller.sd"):
             task = await ctrl._handle_segment(make_segment(1500.0))
         try:
             assert task is not None
-            assert ctrl._playback_cancelled is True
+            # The cut bumps the generation so any in-flight playback stops.
+            assert ctrl._play_gen == 1
         finally:
             if task and not task.done():
                 task.cancel()
