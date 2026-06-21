@@ -155,3 +155,4 @@ class TestBackchannelVsQuestion:
         ctrl._drain_playback.assert_awaited_once()         # cut happened
         assert any(m["content"] == "wait why is that"
                    for m in ctrl._conversation.get_messages())
+        assert ctrl.state == TalkbackState.SPEAKING

@@ -686,6 +686,9 @@ class TalkbackController:
             # ("why?") cut. (Reorder: STT used to run only after the cut.)
             text = await self._stt.transcribe_segment(segment.audio)
 
+            # Note: empty/garbage STT classifies as BACKCHANNEL (stays SPEAKING),
+            # a deliberate change from the old "empty -> LISTENING" cut: never
+            # cut the reply on an un-transcribable blip.
             if classify_interjection(text) is Interjection.BACKCHANNEL:
                 # Acknowledgment, not an interruption: un-duck, keep talking.
                 # No cut, no history pollution, no resume offer.
