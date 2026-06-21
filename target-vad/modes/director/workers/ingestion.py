@@ -65,7 +65,6 @@ class IngestionWorker:
     async def run(self) -> None:
         self._running = True
         _diag("started")
-        loop = asyncio.get_event_loop()
         if _DIAG:
             async def _buf_probe():
                 while self._running:
@@ -74,33 +73,32 @@ class IngestionWorker:
                     _diag(f"mic buffer_len={len(buf) if buf is not None else '?'} "
                           f"mic_running={getattr(self._mic, '_running', '?')}")
             asyncio.create_task(_buf_probe())
-        mic_iter = self._mic.stream()
 
-        def _next_chunk():
-            try:
-                return next(mic_iter)
-            except StopIteration:
-                return None
-
+        # Non-blocking drain loop: pull all available chunks from the mic buffer,
+        # process them, then yield. No run_in_executor over a blocking generator
+        # (that Event-handshake producer/consumer race deadlocked under the
+        # Director's concurrency — the buffer would peg at maxlen and starve).
         n = 0
         while self._running:
-            chunk = await loop.run_in_executor(None, _next_chunk)
-            if chunk is None:
-                _diag("mic EOF / stream ended")
-                break
-            n += 1
-            state = self._state_getter()
-            if _DIAG and n % 100 == 0:
-                _diag(f"{n} chunks read, state={state.name}, "
-                      f"is_speaking={getattr(self._vad, 'is_speaking', '?')}")
-            chunk = self._apply_aec(chunk, state)
-            segments = self._vad.process_chunk(chunk)
-            if segments:
-                _diag(f"VAD produced {len(segments)} segment(s) "
-                      f"dur={[round(s.duration_ms) for s in segments]} state={state.name}")
-            await self._maybe_onset(chunk, state)
-            for seg in segments:
-                await self._on_segment(seg, self._state_getter())
+            chunks = self._mic.read_available()
+            if not chunks:
+                await asyncio.sleep(0.005)
+                continue
+            for chunk in chunks:
+                n += 1
+                state = self._state_getter()
+                if _DIAG and n % 100 == 0:
+                    _diag(f"{n} chunks read, state={state.name}, "
+                          f"is_speaking={getattr(self._vad, 'is_speaking', '?')}")
+                chunk = self._apply_aec(chunk, state)
+                segments = self._vad.process_chunk(chunk)
+                if segments:
+                    _diag(f"VAD produced {len(segments)} segment(s) "
+                          f"dur={[round(s.duration_ms) for s in segments]} state={state.name}")
+                await self._maybe_onset(chunk, state)
+                for seg in segments:
+                    await self._on_segment(seg, self._state_getter())
+            await asyncio.sleep(0)   # cooperative yield to the loop after a batch
 
     def _apply_aec(self, chunk: np.ndarray, state: State) -> np.ndarray:
         """Per-frame AEC during playback (controller.py:819-832). Reads the

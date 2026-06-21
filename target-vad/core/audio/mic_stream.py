@@ -57,6 +57,17 @@ class MicrophoneStream:
             while self._buffer:
                 yield self._buffer.popleft()
 
+    def read_available(self) -> list:
+        """Non-blocking: pop and return ALL currently-buffered chunks (possibly an
+        empty list). deque.popleft is atomic vs the callback's append (CPython), so
+        this is a race-free drain that needs no Event handshake — the async caller
+        polls it with asyncio.sleep instead of blocking an executor thread on the
+        generator (which deadlocked under the Director's concurrency)."""
+        out = []
+        while self._buffer:
+            out.append(self._buffer.popleft())
+        return out
+
     def __enter__(self):
         self.start()
         return self

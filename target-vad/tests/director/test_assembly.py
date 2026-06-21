@@ -76,6 +76,7 @@ def test_build_director_runtime_constructs_real_runtime_and_calibrates_proximity
 
     mic = MagicMock()
     mic.stream = MagicMock(return_value=iter([]))   # no further chunks
+    mic.read_available = MagicMock(return_value=[])
     vad = MagicMock(process_chunk=MagicMock(return_value=[]), reset=MagicMock())
     embedder = MagicMock(extract=MagicMock(
         return_value=np.ones(192, dtype=np.float32) / np.sqrt(192)))
@@ -116,6 +117,7 @@ def test_run_drives_first_segment_to_a_full_turn_and_returns_result():
     # mic yields nothing further; the only turn is the staged first segment.
     mic = MagicMock()
     mic.stream = MagicMock(return_value=iter([]))
+    mic.read_available = MagicMock(return_value=[])
     vad = MagicMock(process_chunk=MagicMock(return_value=[]), reset=MagicMock())
     embedder = MagicMock(extract=MagicMock(
         return_value=np.ones(192, dtype=np.float32) / np.sqrt(192)))

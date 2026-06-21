@@ -14,13 +14,26 @@ from modes.director import events as E
 
 
 class FakeMic:
-    """Yields a fixed list of chunks then stops (mirrors MicrophoneStream.stream)."""
+    """Delivers a fixed batch of chunks once via read_available(), then empties
+    (mirrors MicrophoneStream.read_available: a non-blocking buffer drain)."""
     def __init__(self, chunks):
-        self._chunks = chunks
+        self._chunks = list(chunks)
+        self._delivered = False
 
-    def stream(self):
-        for c in self._chunks:
-            yield c
+    def read_available(self):
+        if self._delivered:
+            return []
+        self._delivered = True
+        return list(self._chunks)
+
+
+async def _run_briefly(w):
+    """Run the (now infinite, non-blocking) ingestion loop just long enough to
+    drain the FakeMic's one batch + process it, then stop it cleanly."""
+    task = asyncio.create_task(w.run())
+    await asyncio.sleep(0.05)
+    w.stop()
+    await task
 
 
 class FakeVad:
@@ -73,7 +86,7 @@ async def test_listening_segment_emits_segment_endpointed_and_stages_audio():
     seg = _seg()
     w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]]),
                               State.LISTENING, turn_prob=0.8)
-    await w.run()
+    await _run_briefly(w)
     evs = [await bus.get() for _ in range(bus.qsize())]
     seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
     assert len(seps) == 1
@@ -87,7 +100,7 @@ async def test_evaluating_segment_emits_interjection_with_speaker_score():
     seg = _seg()
     w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]]),
                               State.EVALUATING, embedder_score=0.77)
-    await w.run()
+    await _run_briefly(w)
     evs = [await bus.get() for _ in range(bus.qsize())]
     inter = [e for e in evs if isinstance(e, E.InterjectionSegment)]
     assert len(inter) == 1 and inter[0].speaker_score == 0.77
@@ -99,7 +112,7 @@ async def test_speaking_onset_emits_near_field_onset_once():
     seg_audio = np.full(512, 0.5, dtype=np.float32)
     vad = FakeVad([[]], is_speaking=True)        # speaking, no endpointed segment yet
     w, bus, stt = make_worker(FakeMic([seg_audio]), vad, State.SPEAKING)
-    await w.run()
+    await _run_briefly(w)
     evs = [await bus.get() for _ in range(bus.qsize())]
     onsets = [e for e in evs if isinstance(e, E.NearFieldOnset)]
     assert len(onsets) == 1 and onsets[0].is_target is True and onsets[0].rms > 0.0
@@ -110,5 +123,5 @@ async def test_far_onset_below_proximity_does_not_emit():
     quiet = np.full(512, 0.001, dtype=np.float32)
     vad = FakeVad([[]], is_speaking=True)
     w, bus, stt = make_worker(FakeMic([quiet]), vad, State.SPEAKING)
-    await w.run()
+    await _run_briefly(w)
     assert bus.qsize() == 0
