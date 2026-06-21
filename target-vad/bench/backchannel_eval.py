@@ -2,8 +2,12 @@
 interjections. Prints accuracy + a confusion breakdown so any future borrowed
 model can be compared against this baseline."""
 
-import json
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import json
 
 from modes.talkback.intent import classify_interjection
 

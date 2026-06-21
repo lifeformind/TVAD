@@ -38,6 +38,9 @@ Options (env-vars)
 
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import time
 import threading
 import numpy as np
@@ -177,7 +180,6 @@ def build_whisper():
 
 
 def build_ecapa():
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from core.speaker.embedder import EmbeddingExtractor
     ext = EmbeddingExtractor()
     ext._ensure_model()
@@ -185,7 +187,6 @@ def build_ecapa():
 
 
 def build_smart_turn():
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
     from modes.talkback.endpointing import SmartTurnDetector
     return SmartTurnDetector()
 
