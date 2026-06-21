@@ -137,6 +137,19 @@ class TalkbackController:
 
     def _transition(self, new_state: TalkbackState) -> None:
         self.state = new_state
+        if new_state == TalkbackState.LISTENING:
+            # Kiosk is (re)entering the wait-for-user state: start the silence
+            # grace window fresh, so a long prior reply never shortens it.
+            self._last_speech_at = time.monotonic()
+
+    def _silence_duration(self) -> float:
+        """User-silence seconds — only accrues while we're waiting for the user
+        (LISTENING). While the kiosk is THINKING/SPEAKING/BARGED_IN the user is
+        expected to be quiet, so silence must not accrue (else a long reply ends
+        the session mid-conversation)."""
+        if self.state != TalkbackState.LISTENING:
+            return 0.0
+        return time.monotonic() - self._last_speech_at
 
     def _dump_wav(self, audio: np.ndarray, tag: str) -> None:
         """Write a float32 [-1,1] segment to 16kHz mono int16 WAV (debug only)."""
@@ -347,7 +360,7 @@ class TalkbackController:
         watchdog = AsyncWatchdog(
             tick_s=watchdog_tick,
             on_timeout=self._handle_timeout,
-            get_silence_duration=lambda: time.monotonic() - self._last_speech_at,
+            get_silence_duration=self._silence_duration,
             get_session_duration=lambda: time.monotonic() - self._started_at,
             silence_timeout_s=silence_timeout,
             hard_timeout_s=hard_timeout,
