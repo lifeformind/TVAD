@@ -79,26 +79,38 @@ class IngestionWorker:
         # (that Event-handshake producer/consumer race deadlocked under the
         # Director's concurrency — the buffer would peg at maxlen and starve).
         n = 0
-        while self._running:
-            chunks = self._mic.read_available()
-            if not chunks:
-                await asyncio.sleep(0.005)
-                continue
-            for chunk in chunks:
-                n += 1
-                state = self._state_getter()
-                if _DIAG and n % 100 == 0:
-                    _diag(f"{n} chunks read, state={state.name}, "
-                          f"is_speaking={getattr(self._vad, 'is_speaking', '?')}")
-                chunk = self._apply_aec(chunk, state)
-                segments = self._vad.process_chunk(chunk)
-                if segments:
-                    _diag(f"VAD produced {len(segments)} segment(s) "
-                          f"dur={[round(s.duration_ms) for s in segments]} state={state.name}")
-                await self._maybe_onset(chunk, state)
-                for seg in segments:
-                    await self._on_segment(seg, self._state_getter())
-            await asyncio.sleep(0)   # cooperative yield to the loop after a batch
+        try:
+            while self._running:
+                chunks = self._mic.read_available()
+                if not chunks:
+                    await asyncio.sleep(0.005)
+                    continue
+                for chunk in chunks:
+                    n += 1
+                    state = self._state_getter()
+                    if _DIAG and n % 100 == 0:
+                        _diag(f"{n} chunks read, state={state.name}, "
+                              f"is_speaking={getattr(self._vad, 'is_speaking', '?')}")
+                    chunk = self._apply_aec(chunk, state)
+                    segments = self._vad.process_chunk(chunk)
+                    if segments:
+                        _diag(f"VAD produced {len(segments)} segment(s) "
+                              f"dur={[round(s.duration_ms) for s in segments]} state={state.name}")
+                    await self._maybe_onset(chunk, state)
+                    for seg in segments:
+                        _diag(f"on_segment ENTER state={self._state_getter().name} "
+                              f"dur={round(seg.duration_ms)}")
+                        await self._on_segment(seg, self._state_getter())
+                        _diag("on_segment EXIT")
+                await asyncio.sleep(0)   # cooperative yield to the loop after a batch
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:        # a crash here silently stops the mic forever
+            import traceback
+            _diag(f"CRASHED at chunk {n}: {type(exc).__name__}: {exc}")
+            print(f"[DIAG ingest] traceback:", file=sys.stderr, flush=True)
+            traceback.print_exc(file=sys.stderr)
+            raise
 
     def _apply_aec(self, chunk: np.ndarray, state: State) -> np.ndarray:
         """Per-frame AEC during playback (controller.py:819-832). Reads the
