@@ -34,17 +34,23 @@ FORCE_INTERRUPT = {
 BACKCHANNEL = {
     "okay", "ok", "yeah", "yep", "yup", "yes", "uhhuh", "mhm", "mm", "hmm",
     "right", "sure", "got", "it", "gotcha", "cool", "nice", "wow", "oh", "ah",
-    "totally", "exactly", "makes", "sense", "fair", "true", "go", "on",
+    "totally", "exactly", "makes", "sense", "fair", "true", "goon",
     "continue", "i", "see", "you", "thanks", "thank", "alright", "great",
+    "noproblem", "noworries",
 }
+
+assert not (FORCE_INTERRUPT & BACKCHANNEL), "lexicon sets must be disjoint"
 
 
 def _tokenize(text: str) -> list[str]:
     t = text.lower()
-    # normalize multi-word backchannels to single known tokens
+    # Order matters: collapse multi-word forms to single known tokens BEFORE
+    # the regex strips non-alpha, so they survive as one token.
     t = (t.replace("uh-huh", "uhhuh").replace("uh huh", "uhhuh")
           .replace("mm-hmm", "mhm").replace("mm hmm", "mhm")
-          .replace("mhmm", "mhm"))
+          .replace("mhmm", "mhm")
+          .replace("go on", "goon")
+          .replace("no problem", "noproblem").replace("no worries", "noworries"))
     return re.findall(r"[a-z]+", t)
 
 

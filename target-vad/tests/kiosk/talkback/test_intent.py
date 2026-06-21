@@ -40,3 +40,16 @@ def test_force_token_wins_over_backchannel_tokens():
 def test_multiple_content_words_interrupt():
     # not in either lexicon, >=2 content words -> treat as a real turn
     assert classify_interjection("tell me about the blue door") == Interjection.INTERRUPT
+
+
+@pytest.mark.parametrize("text", ["no problem", "no worries", "go on"])
+def test_no_problem_and_go_on_are_backchannel(text):
+    assert classify_interjection(text) == Interjection.BACKCHANNEL
+
+
+def test_bare_no_still_interrupts():
+    assert classify_interjection("no") == Interjection.INTERRUPT
+
+
+def test_none_input_is_backchannel():
+    assert classify_interjection(None) == Interjection.BACKCHANNEL
