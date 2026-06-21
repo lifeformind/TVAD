@@ -9,9 +9,18 @@ The Director is the SOLE mutator (spec section 3). Returns DirectorResult at
 session end (spec Req 5: single owner of lifecycle + teardown)."""
 
 import asyncio
+import os
+import sys
 
 from modes.director.result import DirectorResult
 from modes.director import commands as C
+
+_DIAG = bool(os.environ.get("TVAD_DIAG"))
+
+
+def _diag(msg: str) -> None:
+    if _DIAG:
+        print(f"[DIAG runtime] {msg}", file=sys.stderr, flush=True)
 
 
 class DirectorRuntime:
@@ -48,9 +57,13 @@ class DirectorRuntime:
             while self._result_reason is None:
                 event = await self._bus.get()
                 commands = self._director.dispatch(event)
+                if _DIAG and type(event).__name__ != "Tick":
+                    _diag(f"event={type(event).__name__} -> state={self._director.state.name}"
+                          f" cmds={[type(c).__name__ for c in commands]}")
                 for command in commands:
                     await self._route(command)
         finally:
+            _diag(f"loop exit, reason={self._result_reason}")
             await self._teardown(ingestion_task)
         return DirectorResult(
             reason=self._result_reason or "stopped",

@@ -16,6 +16,8 @@ path). The captured audio is staged into the SttWorker so a later
 TranscribeUserTurn/TranscribeInterjection has the right buffer."""
 
 import asyncio
+import os
+import sys
 
 import numpy as np
 
@@ -23,6 +25,13 @@ from modes.director.bus import EventBus
 from modes.director.config import DirectorConfig
 from modes.director.state import State
 from modes.director import events as E
+
+_DIAG = bool(os.environ.get("TVAD_DIAG"))
+
+
+def _diag(msg: str) -> None:
+    if _DIAG:
+        print(f"[DIAG ingest] {msg}", file=sys.stderr, flush=True)
 
 
 def _rms(audio: np.ndarray) -> float:
@@ -55,6 +64,7 @@ class IngestionWorker:
 
     async def run(self) -> None:
         self._running = True
+        _diag("started")
         loop = asyncio.get_event_loop()
         mic_iter = self._mic.stream()
 
@@ -64,13 +74,22 @@ class IngestionWorker:
             except StopIteration:
                 return None
 
+        n = 0
         while self._running:
             chunk = await loop.run_in_executor(None, _next_chunk)
             if chunk is None:
+                _diag("mic EOF / stream ended")
                 break
+            n += 1
             state = self._state_getter()
+            if _DIAG and n % 100 == 0:
+                _diag(f"{n} chunks read, state={state.name}, "
+                      f"is_speaking={getattr(self._vad, 'is_speaking', '?')}")
             chunk = self._apply_aec(chunk, state)
             segments = self._vad.process_chunk(chunk)
+            if segments:
+                _diag(f"VAD produced {len(segments)} segment(s) "
+                      f"dur={[round(s.duration_ms) for s in segments]} state={state.name}")
             await self._maybe_onset(chunk, state)
             for seg in segments:
                 await self._on_segment(seg, self._state_getter())

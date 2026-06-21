@@ -8,6 +8,8 @@ _write_lock. Also executes Duck/Restore (gain) and SpeakNudge (direct TTS of
 "Are you still there?", spec section 5 — no LLM round-trip)."""
 
 import asyncio
+import os
+import sys
 import threading
 
 import numpy as np
@@ -15,6 +17,8 @@ import numpy as np
 from modes.director.bus import EventBus
 from modes.director.config import DirectorConfig
 from modes.director import commands as C
+
+_DIAG = bool(os.environ.get("TVAD_DIAG"))
 
 # 30ms playback frames (controller.py:172): small enough for ~30ms duck latency.
 PLAYBACK_FRAME_SAMPLES = 480
@@ -98,7 +102,14 @@ class PlaybackWorker:
         as the AEC reference, bails if a barge-in superseded this generation or the
         session ended (invariants 2 & 3)."""
         if self._out_stream is None or len(audio) == 0:
+            if _DIAG:
+                print(f"[DIAG playback] _play_audio NO-OP out_stream="
+                      f"{self._out_stream is not None} len={len(audio)}",
+                      file=sys.stderr, flush=True)
             return
+        if _DIAG:
+            print(f"[DIAG playback] writing {len(audio)} samples gain={self._gain}",
+                  file=sys.stderr, flush=True)
         frame = PLAYBACK_FRAME_SAMPLES
         for i in range(0, len(audio), frame):
             if not self._running or gen != self._play_gen:

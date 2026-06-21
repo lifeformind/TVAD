@@ -17,10 +17,14 @@ answers it exactly like any later LISTENING turn (spec section 6).
 """
 
 import asyncio
+import os
+import sys
 import time
 from typing import Any, Callable, Optional
 
 import numpy as np
+
+_DIAG = bool(os.environ.get("TVAD_DIAG"))
 
 from core.speaker.verifier import cosine_similarity
 from modes.director.bus import EventBus
@@ -123,6 +127,10 @@ class DirectorRuntimeFactory:
         # loop drains it first (FIFO bus), the Director answers it, and the
         # conversation proceeds normally. The watchdog owns every later timeout.
         seg = self._first_segment
+        _seg_len = len(seg.audio) if (seg is not None and getattr(seg, "audio", None) is not None) else 0
+        if _DIAG:
+            print(f"[DIAG assembly] seed first_segment samples={_seg_len} "
+                  f"dur_ms={getattr(seg, 'duration_ms', 0)}", file=sys.stderr, flush=True)
 
         async def _run_with_seed():
             if seg is not None and getattr(seg, "audio", None) is not None \
