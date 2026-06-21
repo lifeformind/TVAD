@@ -81,7 +81,7 @@ class NullTurnDetector:
 class SmartTurnDetector:
     """End-of-turn detector backed by the Smart Turn v3.2 ONNX model.
 
-    Lazy-loads the ONNX session on first construction.  Subsequent calls to
+    Loads the ONNX session at construction time.  Subsequent calls to
     endpoint_prob are synchronous (no async required from the caller).
 
     Args:
@@ -91,6 +91,12 @@ class SmartTurnDetector:
     """
 
     def __init__(self, model_path: str | None = None, *, cpu_count: int = 1) -> None:
+        from pipecat.audio.turn.smart_turn._whisper_features import (
+            compute_whisper_log_mel_features,
+        )
+
+        self._compute_features = compute_whisper_log_mel_features
+
         import onnxruntime as ort
 
         # Resolve model path — default to the pipecat-bundled asset.
@@ -126,10 +132,6 @@ class SmartTurnDetector:
         Returns:
             Float in [0, 1].
         """
-        from pipecat.audio.turn.smart_turn._whisper_features import (
-            compute_whisper_log_mel_features,
-        )
-
         audio = np.asarray(audio, dtype=np.float32)
         if audio.ndim != 1:
             raise ValueError(f"endpoint_prob expects 1-D audio; got shape {audio.shape}")
@@ -148,7 +150,7 @@ class SmartTurnDetector:
             audio = np.pad(audio, (pad, 0), mode="constant", constant_values=0)
 
         # Step 3 — Whisper log-mel features, shape (80, 800).
-        log_mel = compute_whisper_log_mel_features(audio, do_normalize=True)
+        log_mel = self._compute_features(audio, do_normalize=True)
 
         # Step 4 — add batch dimension → (1, 80, 800).
         input_features = np.expand_dims(log_mel, axis=0)
@@ -176,7 +178,7 @@ def _bundled_model_path() -> str:
         import importlib_resources as impresources  # type: ignore[import-untyped]
 
         return str(impresources.files(package_path).joinpath(model_name))
-    except Exception:
+    except ImportError:
         pass
 
     from importlib import resources as impresources  # type: ignore[no-redef]
