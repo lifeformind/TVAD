@@ -9,10 +9,19 @@ Mirrors controller.py:461-528 (steer injection, feed/synthesize/play loop,
 cancellable wrapper)."""
 
 import asyncio
+import os
+import sys
 
 from modes.director.bus import EventBus
 from modes.director import events as E
 from modes.director import commands as C
+
+_DIAG = bool(os.environ.get("TVAD_DIAG"))
+
+
+def _diag(msg: str) -> None:
+    if _DIAG:
+        print(f"[DIAG gen] {msg}", file=sys.stderr, flush=True)
 
 
 class GenerationWorker:
@@ -72,6 +81,7 @@ class GenerationWorker:
             messages = messages + [{"role": "system", "content": cmd.steer}]
         chunker = self._chunker_factory()
         full = []
+        spoken = []
         first_frame_sent = False
         try:
             async for token in self._llm.stream(messages):
@@ -80,13 +90,20 @@ class GenerationWorker:
                 if chunk:
                     first_frame_sent = await self._speak_chunk(chunk, gen_id,
                                                                first_frame_sent)
+                    spoken.append(chunk)
+                    # report spoken-so-far so a barge-in records it (reducer
+                    # tracks partial_response -> keeps history alternating)
+                    await self._bus.emit(E.AssistantPartial(gen_id, " ".join(spoken)))
             remaining = chunker.flush()
             if remaining:
                 first_frame_sent = await self._speak_chunk(remaining, gen_id,
                                                            first_frame_sent)
+                spoken.append(remaining)
         except asyncio.CancelledError:
             self._llm.cancel()                           # controller.py:527
             raise
+        _diag(f"gen {gen_id}: streamed {len(full)} tokens, "
+              f"first_frame_sent={first_frame_sent}")
         await self._bus.emit(E.ReplyComplete(gen_id=gen_id,
                                              assistant_text="".join(full)))
 

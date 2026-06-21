@@ -28,6 +28,10 @@ def reduce(state: State, ctx: Context, event) -> tuple:
         if state is State.THINKING and event.gen_id == ctx.gen_id:
             return State.SPEAKING, []
         return state, []
+    if isinstance(event, E.AssistantPartial):
+        if event.gen_id == ctx.gen_id:
+            ctx.partial_response = event.text       # spoken-so-far, for barge-in record
+        return state, []
     if isinstance(event, E.ReplyComplete):
         if state in (State.THINKING, State.SPEAKING) and event.gen_id == ctx.gen_id:
             if event.assistant_text:
@@ -117,8 +121,12 @@ def _on_interjection_transcribed(ctx: Context, ev: E.InterjectionTranscribed) ->
         return _restore_speaking(ctx)                    # keep talking; no history change
     # INTERRUPT: cut the in-flight reply and answer the new question.
     old_gen = ctx.gen_id
-    if ctx.partial_response:
-        ctx.conversation.add_assistant_turn(ctx.partial_response + " [interrupted]")
+    # ALWAYS record an assistant turn for the cut reply, even if nothing was
+    # spoken yet — the LLM returns an EMPTY response for non-alternating history
+    # (two user turns in a row), which silently breaks every later reply.
+    spoken = ctx.partial_response.strip()
+    ctx.conversation.add_assistant_turn(
+        f"{spoken} [interrupted]" if spoken else "[interrupted]")
     ctx.interrupted_stack.append({"query": ctx.current_query,
                                   "partial": ctx.partial_response})
     ctx.ducked = False

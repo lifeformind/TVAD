@@ -51,6 +51,15 @@ class FirstTtsFrame:
 
 
 @dataclass(frozen=True)
+class AssistantPartial:
+    """Spoken-so-far text for the in-flight reply (emitted per sentence). Lets the
+    reducer track partial_response so a barge-in records what was actually said
+    (keeps history strictly alternating; feeds Plan 06 resume)."""
+    gen_id: int
+    text: str
+
+
+@dataclass(frozen=True)
 class ReplyComplete:
     gen_id: int
     assistant_text: str

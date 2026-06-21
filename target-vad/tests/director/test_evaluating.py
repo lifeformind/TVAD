@@ -61,6 +61,35 @@ def test_empty_interjection_restores():
     assert state is State.SPEAKING and cmds == [C.Restore()]
 
 
+def test_assistant_partial_updates_partial_response():
+    ctx = _ctx()
+    ctx.gen_id = 7
+    ctx.partial_response = ""
+    state, cmds = reduce(State.SPEAKING, ctx, E.AssistantPartial(gen_id=7, text="once upon a"))
+    assert state is State.SPEAKING and cmds == []
+    assert ctx.partial_response == "once upon a"
+    # a stale gen_id must NOT clobber the current partial
+    reduce(State.SPEAKING, ctx, E.AssistantPartial(gen_id=6, text="STALE"))
+    assert ctx.partial_response == "once upon a"
+
+
+def test_cut_with_empty_partial_still_records_an_assistant_turn():
+    """The Req-3 live bug: if the barge-in lands before any sentence was spoken,
+    partial_response is empty — but we must STILL add an assistant turn, else the
+    history has two user turns in a row and the LLM returns empty for every later
+    reply (verified against gemma)."""
+    ctx = _ctx()
+    ctx.partial_response = ""                         # nothing spoken yet
+    state, cmds = reduce(State.EVALUATING, ctx,
+                         E.InterjectionTranscribed(text="wait why", mean_word_prob=0.9))
+    assert state is State.THINKING
+    msgs = ctx.conversation.get_messages()
+    # strictly alternating: the cut placeholder sits between the two user turns
+    assert {"role": "assistant", "content": "[interrupted]"} in msgs
+    roles = [m["role"] for m in msgs if m["role"] in ("user", "assistant")]
+    assert all(a != b for a, b in zip(roles, roles[1:])), f"non-alternating: {roles}"
+
+
 def test_question_cuts_and_starts_new_turn():
     ctx = _ctx()
     state, cmds = reduce(State.EVALUATING, ctx,
