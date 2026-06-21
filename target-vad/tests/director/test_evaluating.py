@@ -67,7 +67,8 @@ def test_question_cuts_and_starts_new_turn():
                          E.InterjectionTranscribed(text="wait why is that", mean_word_prob=0.9))
     assert state is State.THINKING
     assert isinstance(cmds[0], C.Cut) and cmds[0].gen_id == 1      # cut the OLD generation
-    assert isinstance(cmds[1], C.StartGeneration) and cmds[1].gen_id == 2
+    assert isinstance(cmds[1], C.Restore)                          # un-duck for the new reply
+    assert isinstance(cmds[2], C.StartGeneration) and cmds[2].gen_id == 2
     assert ctx.ducked is False
     msgs = ctx.conversation.get_messages()
     # interrupted partial preserved + the new user turn added

@@ -123,4 +123,7 @@ def _on_interjection_transcribed(ctx: Context, ev: E.InterjectionTranscribed) ->
                                   "partial": ctx.partial_response})
     ctx.ducked = False
     state, cmds = _start_generation(ctx, ev.text)        # adds user turn, bumps gen_id, THINKING
-    return state, [C.Cut(old_gen)] + cmds
+    # Restore() un-ducks the playback gain (Duck dropped it to duck_level when we
+    # entered EVALUATING). Without it the gain stays pinned at duck_level and the
+    # new reply — and every reply after — plays near-silent.
+    return state, [C.Cut(old_gen), C.Restore()] + cmds

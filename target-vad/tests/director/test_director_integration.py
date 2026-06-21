@@ -37,7 +37,9 @@ def test_full_conversation_with_backchannel_question_and_resume_push():
     d.dispatch(E.InterjectionSegment(900.0, 0.5, True, 0.9))
     cmds = d.dispatch(E.InterjectionTranscribed(text="wait why", mean_word_prob=0.9))
     assert d.state is State.THINKING
-    assert isinstance(cmds[0], C.Cut) and isinstance(cmds[1], C.StartGeneration)
+    assert isinstance(cmds[0], C.Cut)
+    assert isinstance(cmds[1], C.Restore)            # un-duck so the new reply is audible
+    assert isinstance(cmds[2], C.StartGeneration)
     assert d.ctx.interrupted_stack[-1]["query"] == "tell me a story"
     # 4. answer the question, THEN prove silence is suspended while speaking.
     d.dispatch(E.FirstTtsFrame(gen_id=d.ctx.gen_id))     # -> SPEAKING
