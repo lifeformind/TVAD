@@ -27,6 +27,7 @@ from modes.talkback.player import Player
 from modes.talkback.stt import StreamingStt
 from modes.talkback.tts import TtsEngine
 from modes.talkback.watchdog import AsyncWatchdog
+from modes.talkback.intent import Interjection, classify_interjection
 
 try:
     from modes.talkback.aec import AecProcessor
@@ -680,7 +681,22 @@ class TalkbackController:
             else:
                 score = 1.0
 
-            # Verified registered user — CUT the in-flight reply. Stop the old
+            # Speaker-verified primary interjection. Transcribe BEFORE deciding
+            # to cut so backchannels ("okay") keep us talking while questions
+            # ("why?") cut. (Reorder: STT used to run only after the cut.)
+            text = await self._stt.transcribe_segment(segment.audio)
+
+            # Note: empty/garbage STT classifies as BACKCHANNEL (stays SPEAKING),
+            # a deliberate change from the old "empty -> LISTENING" cut: never
+            # cut the reply on an un-transcribable blip.
+            if classify_interjection(text) is Interjection.BACKCHANNEL:
+                # Acknowledgment, not an interruption: un-duck, keep talking.
+                # No cut, no history pollution, no resume offer.
+                self._restore_volume()
+                self._emit("barge_in_backchannel_ignored", {"text": text})
+                return None
+
+            # Genuine question/command — CUT the in-flight reply. Stop the old
             # playback thread and wait for it to exit before the new response
             # writes the stream, so two threads never touch it at once.
             await self._drain_playback()
@@ -697,12 +713,6 @@ class TalkbackController:
 
             # Remember the interrupted answer so we can offer to resume it.
             self._store_interruption()
-
-            # Transcribe barge-in speech and start new response
-            text = await self._stt.transcribe_segment(segment.audio)
-            if not text:
-                self._transition(TalkbackState.LISTENING)
-                return None
 
             self._gain = 1.0
             self._ducked = False

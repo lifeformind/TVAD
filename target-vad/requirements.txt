@@ -1,7 +1,8 @@
 torch>=2.1.0
 torchaudio>=2.1.0
 speechbrain>=1.0.0
-onnxruntime>=1.17.0
+onnxruntime>=1.24.3,<1.25  # match pipecat-ai 1.4 (onnxruntime~=1.24.3)
+pipecat-ai>=1.4,<1.5  # bundles Smart Turn v3.2 endpointer (modes/talkback/endpointing.py)
 numpy>=1.24.0
 scipy>=1.11.0
 sounddevice>=0.4.6
