@@ -57,7 +57,7 @@ kiosk:
       suppression_level: "high"
 
     stt:
-      model: "tiny"
+      model: "base"
       compute_type: "int8"
       device: "cpu"
       partials_every_ms: 300

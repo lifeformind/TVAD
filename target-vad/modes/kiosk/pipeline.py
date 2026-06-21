@@ -189,8 +189,6 @@ class KioskPipeline:
         self._safe_callback(self.on_session_started)
 
         if self._talkback_enabled and self._talkback_controller is not None:
-            self._safe_callback(self.on_event, "handoff_to_talkback",
-                                {"primary_embedding_norm": float(np.linalg.norm(embedding))})
             handoff = TalkbackHandoff(
                 mic=self.mic,
                 primary_embedding=embedding,
