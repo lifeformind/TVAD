@@ -57,6 +57,13 @@ class PlaybackWorker:
         """Align _play_gen with the Context gen_id at the start of a generation."""
         self._play_gen = gen_id
 
+    def get_reference_frame(self, num_samples: int):
+        """AEC reference for the Ingestion worker, which READS the ring while the
+        Playback worker RECORDS it under _write_lock (spec section 10 invariant 3:
+        record + write stay co-located here; ingestion only reads). Delegates to
+        the Player's reference ring; returns None when nothing is buffered."""
+        return self._player.get_reference_frame(num_samples)
+
     async def execute(self, command) -> None:
         if isinstance(command, C.Duck):
             self._gain = command.level

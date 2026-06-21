@@ -125,3 +125,36 @@ async def test_far_onset_below_proximity_does_not_emit():
     w, bus, stt = make_worker(FakeMic([quiet]), vad, State.SPEAKING)
     await _run_briefly(w)
     assert bus.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_aec_uses_real_playback_worker_reference(monkeypatch):
+    """Regression: the ingestion AEC path (state==SPEAKING) calls
+    playback.get_reference_frame — the REAL PlaybackWorker must expose it
+    (delegating to its Player). The other tests pass a MagicMock playback, which
+    masked the missing method; on a box where AEC actually loads this crashed the
+    ingestion task and starved the mic."""
+    from modes.director.workers.playback import PlaybackWorker
+
+    player = MagicMock()
+    player.get_reference_frame = MagicMock(return_value=None)
+    pw = PlaybackWorker(tts=MagicMock(), player=player, cfg=DirectorConfig(), bus=EventBus())
+
+    assert hasattr(pw, "get_reference_frame")
+    assert pw.get_reference_frame(160) is None
+    player.get_reference_frame.assert_called_once_with(160)
+
+    fake_aec = MagicMock()
+    fake_aec.frame_samples = 160
+    fake_aec.process_frame = MagicMock(side_effect=lambda f, r: f)
+    w = IngestionWorker(
+        mic=FakeMic([]), vad=FakeVad([]), aec=fake_aec,
+        turn_detector=FakeTurn(0.9), embedder=MagicMock(),
+        primary_embedding=np.ones(192, dtype=np.float32),
+        stt_worker=MagicMock(), playback=pw, bus=EventBus(),
+        cfg=DirectorConfig(), proximity_rms=0.02,
+        state_getter=lambda: State.SPEAKING, score_fn=lambda a, b: 0.9,
+    )
+    # Must not raise AttributeError; returns processed audio of the same length.
+    out = w._apply_aec(np.zeros(480, dtype=np.float32), State.SPEAKING)
+    assert out is not None and len(out) == 480
