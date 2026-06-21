@@ -31,9 +31,13 @@ class DirectorHandoff:
     embedder: Any
 
 
-@dataclass
+@dataclass(frozen=True)
 class DirectorResult:
-    """What the Director returns when the conversation ends."""
+    """What the Director returns when the conversation ends.
+
+    Frozen: a session result is an immutable record. This is the SINGLE
+    DirectorResult type — modes/director/result.py re-exports it so the runtime
+    and the WakeGate share one class (no isinstance mismatch across the seam)."""
     reason: str
     turns: int
     total_duration_s: float

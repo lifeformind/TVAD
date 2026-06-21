@@ -1,13 +1,10 @@
 """DirectorResult — what DirectorRuntime returns at true session end.
 
-Mirrors modes/talkback/handoff.py:27 (TalkbackResult) so the WakeGate (Plan 03)
-consumes the same shape it does today."""
+Re-exports the SINGLE DirectorResult defined in modes/talkback/handoff.py (the
+binding handoff contract, Plan 02/03). Keeping one class means the runtime's
+return value and the WakeGate's consumed result are the SAME type — no
+isinstance mismatch across the assembly seam (Plan 03). It is frozen there."""
 
-from dataclasses import dataclass
+from modes.talkback.handoff import DirectorResult
 
-
-@dataclass(frozen=True)
-class DirectorResult:
-    reason: str
-    turns: int
-    total_duration_s: float
+__all__ = ["DirectorResult"]
