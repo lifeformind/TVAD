@@ -15,10 +15,11 @@ own asyncio loop internally); the WakeGate thread is parked inside that call for
 the whole conversation. When it returns a DirectorResult, the WakeGate's ONLY
 post-return action is to reset to IDLE.
 
-This component deliberately owns NO Session, NO watchdog thread, NO silence or
-hard timer, and NO _end_session — that double-management was the live bug
-(spec section 1, HARD REQ 5). The grep post-conditions in
-tests/director/test_wakegate_single_ownership.py enforce that absence.
+This component deliberately owns NO session object, NO watchdog thread, NO
+silence/hard timer, and NO session-teardown method — that double-management was
+the live bug (spec section 1, HARD REQ 5). The grep post-conditions in
+tests/director/test_wakegate_single_ownership.py enforce that absence (they ban
+the literal session/timeout identifiers, so this prose avoids them too).
 """
 
 import sys
