@@ -201,3 +201,54 @@ Rationale:
 - If SpeechBrain fine-tuning is later desired, the framework is already in `requirements.txt` and HuggingFace network egress is open for pulling Switchboard-style corpora.
 
 **Conclusion**: The lexical baseline is the appropriate Task 6 starting point. It gives a measurable F1 against which a trained model can later be compared, without blocking progress on any package availability issue.
+
+---
+
+## Task 6 — lexical backchannel baseline
+
+**Run command**: `PYTHONPATH=/path/to/target-vad python3 bench/backchannel_eval.py bench/backchannel_labels.json`
+
+### Dataset
+
+- **Total cases**: 54
+- **Class balance**: 29 BACKCHANNEL / 25 INTERRUPT (54/46 split — reasonably balanced)
+- **Real-log utterances**: 10 drawn from `logs/kiosk-*.jsonl` `user_turn_complete` events (`"Thank you."`, `"Yeah."`, `"Okay."`, `"Stop."`, `"Can you stop?"`, `"Is there more to the story?"`, `"What is bioluminescence?"`, `"Can you go back to the story about Flika?"`, `"so uh"`, `"Yeah."`)
+- **Hand-written cases**: 44, covering pure backchannels, multi-word acks (go on, no problem, no worries), plain questions/commands, ack-pivot combinations, and deliberate hard/ambiguous cases the lexical approach plausibly gets wrong
+
+### Measured accuracy
+
+```
+lexical accuracy: 48/54 = 88.9%
+confusion (gold,pred) BB/BI/IB/II: {'BB': 24, 'BI': 5, 'IB': 1, 'II': 24}
+```
+
+- **Precision (BACKCHANNEL)**: 24/25 = 96.0%  (almost no false backchannels — the "default-to-cut" design is conservative)
+- **Recall (BACKCHANNEL)**: 24/29 = 82.8%  (misses ~17% of true backchannels)
+- **False interrupt rate** (BI): 5/29 = 17.2%  (user says something harmless; system cuts anyway)
+- **False backchannel rate** (IB): 1/25 = 4.0%  (system stays talking when user wanted to interrupt)
+
+### Misclassifications (6 total)
+
+| Gold | Pred | Text | What it reveals |
+|------|------|------|-----------------|
+| BACKCHANNEL | INTERRUPT | `'interesting'` | Common listener-reaction word not in the backchannel token set; defaults to INTERRUPT. Easy fix: add "interesting" to BACKCHANNEL set. |
+| BACKCHANNEL | INTERRUPT | `'no'` | `'no'` is in FORCE_INTERRUPT to catch corrections; however in isolation ("no no, I get it") it is often a filler. The ambiguity is real and hard to resolve without prosody. |
+| BACKCHANNEL | INTERRUPT | `'yeah no'` | Conversational filler ("yeah no totally"); `'no'` triggers FORCE_INTERRUPT. Same `'no'` ambiguity as above. |
+| BACKCHANNEL | INTERRUPT | `'and'` | Single-word continuation prompt (like "go on"); not in backchannel set, so defaults to INTERRUPT. Relatively rare in practice. |
+| BACKCHANNEL | INTERRUPT | `'so uh'` | From real log — hesitation filler before the user resumed their question; `'so'` is not in any set, defaults to INTERRUPT. |
+| INTERRUPT | BACKCHANNEL | `'right?'` | The word `'right'` is a backchannel token, but with rising intonation it is a confirmation-seek. Text alone cannot distinguish. Only false-backchannel (IB) miss — most dangerous type. |
+
+**What the errors reveal**: The classifier's errors fall into two clear clusters:
+1. **Unknown single-token words** (`interesting`, `and`, `so uh`) that default to INTERRUPT. These are benign errors in a "default-to-cut" system — the user gets interrupted slightly too often, not silenced.
+2. **`'no'` ambiguity**: The word sits at the boundary of correction vs filler. Prosody (short, unstressed "no" vs sharp stressed "NO") would resolve this; text cannot.
+3. **Intonation-dependent cases** (`right?`): The one IB miss. This is the most dangerous error type because it means the system keeps talking when the user wanted to interject. Intonation-aware models would catch this.
+
+### Caveats
+
+- **Small sample (54 cases)**: The error rate estimates have wide confidence intervals (±6–8 pp at 95%). The 88.9% accuracy is indicative, not definitive.
+- **Lab-authored utterances**: 44/54 cases are hand-written to stress-test the classifier, not drawn from production traffic. Real-world accuracy may be higher on common backchannels and lower on unusual phrasings.
+- **No prosody signal**: All hard cases (`right?`, `no`, `yeah no`, `interesting`) would likely be resolved correctly by a prosody-aware or audio-based model.
+
+### Recommendation
+
+**Keep lexical for v0.** The 88.9% accuracy is adequate for a barge-in gate where false interrupts are annoying but recoverable (auto-resume self-heals) and false backchannels are rare (4% IB rate). The `'no'` + intonation cluster is the clearest gap; any borrowed model would need to beat ~89% accuracy on a balanced English set and specifically improve IB recall to justify added complexity. The three-line fixes (`interesting`, `and` added to BACKCHANNEL; `no` moved to a "context-sensitive" tier) would push lexical accuracy to ~94% without a model change, and should be considered before reaching for a borrowed model.
