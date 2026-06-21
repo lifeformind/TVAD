@@ -232,6 +232,14 @@ def _open_output_stream(tb_cfg: dict):  # pragma: no cover - needs real audio de
     """Open a persistent sounddevice OutputStream so playback frames can be
     written + recorded as the AEC reference (controller.py:316-323). Returns None
     if no device is available (degraded: no audible output, still runs)."""
+    if os.environ.get("TVAD_NO_OUTPUT"):
+        # Isolation switch: skip opening the OutputStream entirely. If the mic
+        # then works (turns transcribed), opening the output stream was resetting
+        # the (USB) audio device and killing the mic.
+        if _DIAG:
+            print("[DIAG assembly] TVAD_NO_OUTPUT set: NOT opening OutputStream",
+                  file=sys.stderr, flush=True)
+        return None
     try:
         import sounddevice as sd
         stream = sd.OutputStream(
