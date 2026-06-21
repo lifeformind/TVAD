@@ -23,6 +23,7 @@ class GenerationWorker:
         self._playback = playback
         self._bus = bus
         self._task = None
+        self._llm_loop_bound = False
 
     async def execute(self, command) -> None:
         if isinstance(command, C.StartGeneration):
@@ -30,10 +31,39 @@ class GenerationWorker:
         elif isinstance(command, C.Cut):
             await self._cut(command)
 
+    async def _rebind_llm_once(self) -> None:
+        """Drop any aiohttp session bound to a PREVIOUS (now-closed) event loop —
+        e.g. the startup `asyncio.run(llm.ping())` loop (kiosk.py) — so the first
+        stream() binds a fresh session to THIS runtime's loop. Without this,
+        LlmClient._ensure_session reuses the dead-loop session and stream() hangs.
+        Mirrors TalkbackController._run_async (controller.py:264). Runs ONCE per
+        GenerationWorker (a new one is built per session)."""
+        if self._llm_loop_bound:
+            return
+        self._llm_loop_bound = True
+        close = getattr(self._llm, "close", None)
+        if close is not None:
+            try:
+                await close()
+            except Exception:
+                pass
+
+    async def aclose(self) -> None:
+        """Close the LLM session at session teardown (it is bound to THIS loop
+        now, so closing is clean) — avoids leaking one aiohttp session per
+        session across the kiosk's many wake cycles."""
+        close = getattr(self._llm, "close", None)
+        if close is not None:
+            try:
+                await close()
+            except Exception:
+                pass
+
     async def _start(self, cmd: C.StartGeneration) -> None:
         """Run one generation to completion. Caller (runtime) awaits this; the
         runtime keeps draining the bus, so emitted FirstTtsFrame/ReplyComplete
         are processed in order."""
+        await self._rebind_llm_once()
         self._task = asyncio.current_task()
         gen_id = cmd.gen_id
         self._playback.set_gen(gen_id)

@@ -90,6 +90,7 @@ class DirectorRuntime:
             except (asyncio.CancelledError, Exception):
                 pass
         self._gen_task = None
+        await self._generation.aclose()     # close the LLM session (no leak per session)
         await self._playback.drain()        # await in-flight write BEFORE close
         await self._watchdog.stop()
         self._playback.close()
