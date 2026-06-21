@@ -65,6 +65,11 @@ class WakeGate:
 
         self._wake_time: Optional[float] = None
         self._running = False
+        # Set by _start_session_from_segment; consumed by run(). Lets us CLOSE the
+        # wake mic generator before runtime.run so the Director's ingestion worker
+        # is the SOLE mic consumer during the session (two concurrent stream()
+        # generators on one MicrophoneStream starve each other on a real device).
+        self._pending_handoff: Optional[Any] = None
 
         # Warm up ECAPA so the first wake -> snapshot transition doesn't pay the
         # model's cold-start latency (~1.3s on CPU). Skip when injected (tests).
@@ -81,21 +86,51 @@ class WakeGate:
         self._running = False
 
     def run(self) -> None:
-        """Main mic loop. Blocks until stop() or KeyboardInterrupt. NOTE: while a
-        session is active, this thread is parked inside runtime.run(handoff) and
-        is NOT iterating the mic loop — the Director owns the mic during a
-        session. There is no watchdog here; the Director owns the single one."""
+        """Main loop. Blocks until stop() or KeyboardInterrupt. Each cycle: read
+        the mic ONLY to detect wake + the first speech segment, then CLOSE that
+        mic generator and hand off to runtime.run(handoff). Closing the wake
+        generator first means the Director's ingestion worker is the sole mic
+        consumer during the session — there is never a second parked stream()
+        generator competing for the shared buffer. The mic device stays open
+        across sessions (outer `with`); only the per-cycle wake generator closes.
+        There is no watchdog here; the Director owns the single one."""
         self._running = True
         try:
             with self.mic:
-                for chunk in self.mic.stream():
-                    if not self._running:
+                while self._running:
+                    handoff = self._collect_handoff()
+                    if handoff is None:
                         break
-                    self._handle_chunk(chunk)
+                    result = self.runtime.run(handoff)
+                    self._reset_to_idle()
+                    self._safe_callback(self.on_event, "session_ended",
+                                        {"reason": result.reason})
         except KeyboardInterrupt:
             pass
         finally:
             self._running = False
+
+    def _collect_handoff(self) -> Optional[Any]:
+        """Iterate the mic until wake + first speech segment produces a handoff,
+        then return it. The local generator is CLOSED in `finally` so it is NOT
+        left parked during the session (single mic consumer — see run())."""
+        self._pending_handoff = None
+        gen = self.mic.stream()
+        try:
+            for chunk in gen:
+                if not self._running:
+                    return None
+                self._handle_chunk(chunk)
+                if self._pending_handoff is not None:
+                    handoff, self._pending_handoff = self._pending_handoff, None
+                    return handoff
+            return None
+        finally:
+            # Terminate the suspended generator (GeneratorExit) so it is not left
+            # parked. Defensive: plain iterators (test fakes) have no close().
+            close = getattr(gen, "close", None)
+            if close is not None:
+                close()
 
     def _handle_chunk(self, chunk: np.ndarray) -> None:
         if self._state == "IDLE":
@@ -142,7 +177,14 @@ class WakeGate:
         # now the holdout IS the first-segment/primary embedding. Acceptable
         # ONLY because Plan 05 replaces it; verify-before-serve trivially passes
         # at cosine(primary, primary) == 1.0 until then.
-        handoff = DirectorHandoff(
+        #
+        # Stage the handoff for run() to execute AFTER _collect_handoff closes the
+        # wake mic generator — so runtime.run is NOT called from inside a parked
+        # generator and the Director's ingestion is the sole mic consumer. run()
+        # makes the single blocking runtime.run call and emits session_ended from
+        # DirectorResult.reason (spec section 4a — the Director is the sole session
+        # owner and the only end-reason authority).
+        self._pending_handoff = DirectorHandoff(
             mic=self.mic,
             primary_embedding=embedding,
             holdout_embedding=embedding,
@@ -151,16 +193,6 @@ class WakeGate:
             vad=self.vad,
             embedder=self.embedder,
         )
-
-        # ONE blocking call. The Director owns the whole conversation and every
-        # timer; it returns only at true session end. This is the single point
-        # of session ownership transfer (spec section 4a.2).
-        result = self.runtime.run(handoff)
-
-        # The ONLY post-return action: reset to IDLE. The end reason originates
-        # solely from DirectorResult.reason (spec section 4a.3).
-        self._reset_to_idle()
-        self._safe_callback(self.on_event, "session_ended", {"reason": result.reason})
 
     def _reset_to_idle(self) -> None:
         self._state = "IDLE"

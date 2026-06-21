@@ -66,6 +66,14 @@ class IngestionWorker:
         self._running = True
         _diag("started")
         loop = asyncio.get_event_loop()
+        if _DIAG:
+            async def _buf_probe():
+                while self._running:
+                    await asyncio.sleep(1.0)
+                    buf = getattr(self._mic, "_buffer", None)
+                    _diag(f"mic buffer_len={len(buf) if buf is not None else '?'} "
+                          f"mic_running={getattr(self._mic, '_running', '?')}")
+            asyncio.create_task(_buf_probe())
         mic_iter = self._mic.stream()
 
         def _next_chunk():

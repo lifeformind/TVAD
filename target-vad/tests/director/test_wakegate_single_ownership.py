@@ -111,11 +111,18 @@ def _segment(duration_ms=1000.0):
     )
 
 
-def _drive_to_handoff(g):
+def _drive_one_cycle(g, seg=None):
+    """One full wake->session cycle through g.run() with a finite mic (wake chunk
+    then first-segment chunk, then exhausted). runtime.run is called from run()
+    after the wake mic generator is closed."""
+    seg = seg or _segment()
+    g.mic.stream = MagicMock(return_value=iter([
+        np.zeros(480, dtype=np.float32),
+        np.zeros(480, dtype=np.float32),
+    ]))
     g.wake_detector.process.return_value = 0.9
-    g._handle_chunk(np.zeros(480, dtype=np.float32))   # → AWAIT_FIRST_SEGMENT
-    g.vad.process_chunk.return_value = [_segment()]
-    g._handle_chunk(np.zeros(480, dtype=np.float32))   # snapshot → blocking run → IDLE
+    g.vad.process_chunk.return_value = [seg]
+    g.run()
 
 
 def test_runtime_run_is_a_single_blocking_call_returning_a_result():
@@ -131,7 +138,7 @@ def test_runtime_run_is_a_single_blocking_call_returning_a_result():
 
     runtime.run = MagicMock(side_effect=fake_run)
     g = _make_gate(runtime=runtime)
-    _drive_to_handoff(g)
+    _drive_one_cycle(g)
     assert order == ["inside_run"]          # called exactly once, synchronously
     assert runtime.run.call_count == 1
     assert g._state == "IDLE"               # control returned and reset
@@ -145,7 +152,7 @@ def test_only_post_return_action_is_reset_to_idle():
     runtime = MagicMock(run=MagicMock(
         return_value=DirectorResult(reason="lockout", turns=4, total_duration_s=42.0)))
     g = _make_gate(runtime=runtime, on_event=lambda et, pl: events.append((et, pl)))
-    _drive_to_handoff(g)
+    _drive_one_cycle(g)
     assert g._state == "IDLE"
     g.wake_detector.reset.assert_called()
     # the reason came from DirectorResult, nowhere else
@@ -172,24 +179,26 @@ def test_no_orphan_after_end_requires_a_new_wake():
     runtime = MagicMock(run=MagicMock(
         return_value=DirectorResult(reason="silence_timeout", turns=1, total_duration_s=3.0)))
     g = _make_gate(runtime=runtime)
-    _drive_to_handoff(g)
+    _drive_one_cycle(g)
     assert g._state == "IDLE"
     assert runtime.run.call_count == 1
 
     # Simulate post-end "orphan" speech: VAD would emit segments, but the wake
-    # detector returns None (no wake). The gate must stay IDLE and NOT hand off.
+    # detector returns None (no wake). The gate must stay IDLE and arm NO handoff
+    # (the handoff is what run() would feed to a session — none means no session).
+    g._pending_handoff = None
     g.wake_detector.process.return_value = None
     g.vad.process_chunk.return_value = [_segment(), _segment()]
     for _ in range(5):
         g._handle_chunk(np.zeros(480, dtype=np.float32))
     assert g._state == "IDLE"
-    assert runtime.run.call_count == 1      # NO second session started by orphan speech
+    assert g._pending_handoff is None       # NO session armed by orphan speech
 
-    # A genuine new wake DOES re-arm a fresh session.
+    # A genuine new wake DOES re-arm a fresh session (a handoff is built, which
+    # run() would then feed to runtime.run — exactly one session per new wake).
     g.wake_detector.process.return_value = 0.9
     g._handle_chunk(np.zeros(480, dtype=np.float32))
     assert g._state == "AWAIT_FIRST_SEGMENT"
     g.vad.process_chunk.return_value = [_segment()]
     g._handle_chunk(np.zeros(480, dtype=np.float32))
-    assert runtime.run.call_count == 2      # exactly one new session per new wake
-    assert g._state == "IDLE"
+    assert g._pending_handoff is not None   # a fresh session armed by the new wake

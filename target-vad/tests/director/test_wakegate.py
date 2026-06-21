@@ -94,6 +94,22 @@ def make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
     )
 
 
+def drive_one_cycle(g, fake_wake, fake_vad, seg=None):
+    """Drive ONE full wake->session cycle through g.run() with a finite mic.
+    The mic yields a wake chunk then a first-segment chunk, then is exhausted, so
+    g.run() runs the single session and exits. runtime.run is called from run()
+    AFTER the wake mic generator is closed (single-consumer handoff)."""
+    seg = seg or make_segment()
+    g.mic.stream = MagicMock(return_value=iter([
+        np.zeros(480, dtype=np.float32),   # chunk 1 -> wake detected
+        np.zeros(480, dtype=np.float32),   # chunk 2 -> first speech segment
+    ]))
+    fake_wake.process.return_value = 0.87
+    fake_vad.process_chunk.return_value = [seg]
+    g.run()
+    return seg
+
+
 class TestWakeGateInit:
     def test_starts_in_idle(self, base_config, fake_mic, fake_vad, fake_embedder,
                             fake_wake, fake_runtime):
@@ -154,11 +170,7 @@ class TestIdleAndAwait:
 
 class TestHandoff:
     def _drive_to_handoff(self, g, fake_wake, fake_vad):
-        fake_wake.process.return_value = 0.87
-        g._handle_chunk(np.zeros(480, dtype=np.float32))   # → AWAIT_FIRST_SEGMENT
-        assert g._state == "AWAIT_FIRST_SEGMENT"
-        fake_vad.process_chunk.return_value = [make_segment()]
-        g._handle_chunk(np.zeros(480, dtype=np.float32))   # snapshot → handoff → IDLE
+        drive_one_cycle(g, fake_wake, fake_vad)
 
     def test_first_segment_builds_handoff_and_calls_runtime(
             self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime):
@@ -191,11 +203,8 @@ class TestHandoff:
     def test_handoff_passes_first_segment(
             self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime):
         g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime)
-        fake_wake.process.return_value = 0.87
-        g._handle_chunk(np.zeros(480, dtype=np.float32))
         seg = make_segment(500.0)
-        fake_vad.process_chunk.return_value = [seg]
-        g._handle_chunk(np.zeros(480, dtype=np.float32))
+        drive_one_cycle(g, fake_wake, fake_vad, seg=seg)
         handoff = fake_runtime.run.call_args[0][0]
         assert handoff.first_segment is seg
 
@@ -243,10 +252,7 @@ class TestHandoff:
             on_event=lambda et, pl: ended.append((et, pl)),
             _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
         )
-        fake_wake.process.return_value = 0.87
-        g._handle_chunk(np.zeros(480, dtype=np.float32))
-        fake_vad.process_chunk.return_value = [make_segment()]
-        g._handle_chunk(np.zeros(480, dtype=np.float32))
+        drive_one_cycle(g, fake_wake, fake_vad)
         assert ("session_ended", {"reason": "hard_timeout"}) in ended
 
 
@@ -260,8 +266,5 @@ class TestEventCallbackRobustness:
             config=base_config, runtime=fake_runtime, on_event=buggy,
             _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
         )
-        fake_wake.process.return_value = 0.87
-        g._handle_chunk(np.zeros(480, dtype=np.float32))   # buggy on_event runs, swallowed
-        fake_vad.process_chunk.return_value = [make_segment()]
-        g._handle_chunk(np.zeros(480, dtype=np.float32))   # more buggy events, swallowed
+        drive_one_cycle(g, fake_wake, fake_vad)            # buggy events swallowed
         assert g._state == "IDLE"                          # still completed the cycle

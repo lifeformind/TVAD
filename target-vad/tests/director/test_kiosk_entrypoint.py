@@ -53,11 +53,15 @@ def test_build_wakegate_attaches_runtime_and_emits_events_from_one_owner():
         _mic=fake_mic, _vad=fake_vad, _embedder=fake_embedder, _wake_detector=fake_wake,
     )
 
-    # Drive one full cycle: wake -> snapshot -> blocking handoff -> IDLE
+    # Drive one full cycle through run() with a finite mic:
+    # wake -> snapshot -> (close wake gen) -> blocking handoff -> IDLE.
+    gate.mic.stream = MagicMock(return_value=iter([
+        np.zeros(480, dtype=np.float32),   # chunk 1 -> wake
+        np.zeros(480, dtype=np.float32),   # chunk 2 -> first segment
+    ]))
     fake_wake.process.return_value = 0.9
-    gate._handle_chunk(np.zeros(480, dtype=np.float32))
     fake_vad.process_chunk.return_value = [_segment()]
-    gate._handle_chunk(np.zeros(480, dtype=np.float32))
+    gate.run()
 
     runtime.run.assert_called_once()
     assert gate._state == "IDLE"
