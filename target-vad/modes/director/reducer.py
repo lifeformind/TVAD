@@ -38,6 +38,16 @@ def reduce(state: State, ctx: Context, event) -> tuple:
                 ctx.conversation.add_assistant_turn(event.assistant_text)
             _enter_listening(ctx)
             return State.LISTENING, []
+        if state is State.EVALUATING and event.gen_id == ctx.gen_id:
+            # The duck coincided with the reply finishing. Record the turn now
+            # (else history desyncs) and remember it's done, but stay EVALUATING
+            # until the interjection is resolved. reply_done steers the exit:
+            # a reject must go to LISTENING (no more ReplyComplete is coming),
+            # NOT back to SPEAKING where the kiosk would sit mute until the cap.
+            if event.assistant_text:
+                ctx.conversation.add_assistant_turn(event.assistant_text)
+            ctx.reply_done = True
+            return State.EVALUATING, []
         return state, []
     if isinstance(event, E.NearFieldOnset) and state is State.SPEAKING:
         if event.is_target and event.rms >= ctx.proximity_rms:
@@ -69,6 +79,7 @@ def _enter_listening(ctx: Context) -> None:
     """Yield the floor: restart the silence grace window and re-arm the nudge."""
     ctx.last_speech_at = ctx.now
     ctx.nudged_cycle = False
+    ctx.reply_done = False
 
 
 def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
@@ -90,6 +101,7 @@ def _start_generation(ctx: Context, query: str) -> tuple:
     ctx.conversation.add_user_turn(query)
     ctx.current_query = query
     ctx.partial_response = ""
+    ctx.reply_done = False
     ctx.gen_id += 1
     steer = ctx.pending_steer
     ctx.pending_steer = None                      # one-shot
@@ -98,8 +110,12 @@ def _start_generation(ctx: Context, query: str) -> tuple:
 
 
 def _restore_speaking(ctx: Context) -> tuple:
-    """Un-duck and keep talking — the non-cut EVALUATING exits."""
+    """Un-duck and exit EVALUATING. If the reply finished while we were ducked,
+    there's nothing left to speak -> go LISTENING; otherwise resume SPEAKING."""
     ctx.ducked = False
+    if ctx.reply_done:
+        _enter_listening(ctx)                # also clears reply_done
+        return State.LISTENING, [C.Restore()]
     return State.SPEAKING, [C.Restore()]
 
 
@@ -121,14 +137,18 @@ def _on_interjection_transcribed(ctx: Context, ev: E.InterjectionTranscribed) ->
         return _restore_speaking(ctx)                    # keep talking; no history change
     # INTERRUPT: cut the in-flight reply and answer the new question.
     old_gen = ctx.gen_id
-    # ALWAYS record an assistant turn for the cut reply, even if nothing was
-    # spoken yet — the LLM returns an EMPTY response for non-alternating history
-    # (two user turns in a row), which silently breaks every later reply.
-    spoken = ctx.partial_response.strip()
-    ctx.conversation.add_assistant_turn(
-        f"{spoken} [interrupted]" if spoken else "[interrupted]")
-    ctx.interrupted_stack.append({"query": ctx.current_query,
-                                  "partial": ctx.partial_response})
+    if not ctx.reply_done:
+        # Record an assistant turn for the cut reply, even if nothing was spoken
+        # yet — the LLM returns an EMPTY response for non-alternating history (two
+        # user turns in a row), which silently breaks every later reply. When
+        # reply_done, the ReplyComplete handler ALREADY recorded the full turn —
+        # recording again here would put two assistant turns in a row (same bug,
+        # mirrored), and a completed reply was not actually interrupted.
+        spoken = ctx.partial_response.strip()
+        ctx.conversation.add_assistant_turn(
+            f"{spoken} [interrupted]" if spoken else "[interrupted]")
+        ctx.interrupted_stack.append({"query": ctx.current_query,
+                                      "partial": ctx.partial_response})
     ctx.ducked = False
     state, cmds = _start_generation(ctx, ev.text)        # adds user turn, bumps gen_id, THINKING
     # Restore() un-ducks the playback gain (Duck dropped it to duck_level when we

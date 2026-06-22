@@ -90,6 +90,62 @@ def test_cut_with_empty_partial_still_records_an_assistant_turn():
     assert all(a != b for a, b in zip(roles, roles[1:])), f"non-alternating: {roles}"
 
 
+def test_reply_complete_during_evaluating_records_turn_and_waits():
+    """A duck (NearFieldOnset->EVALUATING) can coincide with the reply FINISHING,
+    so ReplyComplete lands in EVALUATING. It must record the assistant turn (else
+    history desyncs) and remember the reply is done — but stay in EVALUATING until
+    the interjection is resolved."""
+    ctx = _ctx()
+    ctx.conversation.add_user_turn("tell me a story")
+    state, cmds = reduce(State.EVALUATING, ctx,
+                         E.ReplyComplete(gen_id=1, assistant_text="once upon a time the end"))
+    assert state is State.EVALUATING and cmds == []
+    assert ctx.reply_done is True
+    assert {"role": "assistant", "content": "once upon a time the end"} \
+        in ctx.conversation.get_messages()
+
+
+def test_reject_after_reply_completed_during_eval_returns_to_listening():
+    """The live hang: if the reply finished while ducked and the interjection is
+    then REJECTED, we must go to LISTENING (the reply is over) — NOT back to
+    SPEAKING, where no ReplyComplete will ever come and the kiosk goes mute until
+    the hard timeout."""
+    ctx = _ctx()
+    reduce(State.EVALUATING, ctx, E.ReplyComplete(gen_id=1, assistant_text="done"))
+    state, cmds = reduce(State.EVALUATING, ctx, _seg(duration_ms=300.0))   # too short -> reject
+    assert state is State.LISTENING
+    assert cmds == [C.Restore()]
+    assert ctx.ducked is False
+
+
+def test_backchannel_after_reply_completed_during_eval_returns_to_listening():
+    ctx = _ctx()
+    reduce(State.EVALUATING, ctx, E.ReplyComplete(gen_id=1, assistant_text="done"))
+    state, cmds = reduce(State.EVALUATING, ctx,
+                         E.InterjectionTranscribed(text="yeah got it", mean_word_prob=0.9))
+    assert state is State.LISTENING and cmds == [C.Restore()]
+
+
+def test_interrupt_after_reply_completed_during_eval_keeps_history_alternating():
+    """If the reply already completed (recorded once) and THEN a real interrupt
+    lands, we must NOT record a second assistant turn — that would put two
+    assistant turns in a row and break alternation just like the empty-reply bug."""
+    ctx = _ctx()
+    ctx.conversation.add_user_turn("tell me a story")
+    reduce(State.EVALUATING, ctx, E.ReplyComplete(gen_id=1, assistant_text="the full story"))
+    state, cmds = reduce(State.EVALUATING, ctx,
+                         E.InterjectionTranscribed(text="wait why is that", mean_word_prob=0.9))
+    assert state is State.THINKING
+    msgs = ctx.conversation.get_messages()
+    assert {"role": "assistant", "content": "the full story"} in msgs
+    # the completed reply is NOT re-tagged as interrupted
+    assert all("[interrupted]" not in m["content"]
+               for m in msgs if m["role"] == "assistant")
+    assert {"role": "user", "content": "wait why is that"} in msgs
+    roles = [m["role"] for m in msgs if m["role"] in ("user", "assistant")]
+    assert all(a != b for a, b in zip(roles, roles[1:])), f"non-alternating: {roles}"
+
+
 def test_question_cuts_and_starts_new_turn():
     ctx = _ctx()
     state, cmds = reduce(State.EVALUATING, ctx,
