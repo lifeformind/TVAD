@@ -64,7 +64,7 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
         min_speech_ms=barge.get("min_speech_ms", 120.0),
         verify_window_ms=barge.get("verify_window_ms", 700.0),
         speaker_threshold=barge.get("speaker_threshold", 0.20),
-        duck_level=barge.get("duck_level", 0.15),
+        duck_level=barge.get("duck_level", 0.35),
     )
 
 

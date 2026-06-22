@@ -20,7 +20,7 @@ def test_config_defaults_match_spec():
     assert c.min_speech_ms == 120.0
     assert c.speaker_threshold == 0.20
     assert c.conf_floor == 0.5
-    assert c.duck_level == 0.15
+    assert c.duck_level == 0.35
 
 
 def test_new_context_starts_a_session_clock():

@@ -129,7 +129,7 @@ kiosk:
       min_speech_ms: 120
       speaker_threshold: 0.20      # provisional; live barge-ins (AEC on) scored ~0.12-0.41
       verify_window_ms: 700        # 1200 rejected most real barge-ins as too_short; proximity guards bystanders
-      duck_level: 0.15             # TTS gain while capturing an interruption
+      duck_level: 0.35             # TTS gain while capturing an interruption; partial (not near-silent) so a rejected interjection doesn't lose the reply's tail. Watch: louder duck = more self-voice in the mic for AEC to cancel
       duck_ramp_ms: 120
       proximity:
         enabled: true              # ignore speech too quiet to be someone at the kiosk
