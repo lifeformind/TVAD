@@ -42,7 +42,7 @@ class IngestionWorker:
     def __init__(self, mic, vad, aec, turn_detector, embedder,
                  primary_embedding, stt_worker, playback, bus: EventBus,
                  cfg: DirectorConfig, proximity_rms: float, state_getter,
-                 score_fn):
+                 score_fn, pvad=None):
         self._mic = mic
         self._vad = vad
         self._aec = aec
@@ -56,6 +56,9 @@ class IngestionWorker:
         self._proximity_rms = proximity_rms
         self._state_getter = state_getter
         self._score_fn = score_fn          # cosine(embedding, primary) -> float
+        self._pvad = pvad                  # Plan 05 PvadWorker; None -> is_target=True
+        self._chunk_frames = []            # most recent chunk's pVAD SpeakerFrames
+        self._seg_frames = []              # pVAD frames over the current voiced run
         self._running = False
         self._ducked_onset = False         # one onset per speech run (controller.py:842)
 
@@ -92,6 +95,7 @@ class IngestionWorker:
                         _diag(f"{n} chunks read, state={state.name}, "
                               f"is_speaking={getattr(self._vad, 'is_speaking', '?')}")
                     chunk = self._apply_aec(chunk, state)
+                    self._run_pvad(chunk, n)
                     segments = self._vad.process_chunk(chunk)
                     if segments:
                         _diag(f"VAD produced {len(segments)} segment(s) "
@@ -111,6 +115,32 @@ class IngestionWorker:
             print(f"[DIAG ingest] traceback:", file=sys.stderr, flush=True)
             traceback.print_exc(file=sys.stderr)
             raise
+
+    def _run_pvad(self, chunk: np.ndarray, n: int) -> None:
+        """Run the per-chunk pVAD (Plan 05) to keep the streaming state advancing
+        and accumulate the voiced run's frames for the segment-level is_target.
+        Must run on EVERY chunk (state is carried) but only voiced frames feed the
+        segment decision, so inter-run silence doesn't dilute it."""
+        if self._pvad is None:
+            self._chunk_frames = []
+            return
+        self._chunk_frames = self._pvad.process(chunk, ts=float(n))
+        if getattr(self._vad, "is_speaking", False):
+            self._seg_frames.extend(self._chunk_frames)
+
+    def _target_from(self, frames) -> tuple:
+        """(is_target, speaker_score) from pVAD frames. No pVAD -> (True, None)
+        so the caller keeps the legacy is_target=True / ECAPA score. With pVAD but
+        no frames -> fail-open is_target (don't drop the user on no signal) with a
+        0.0 score (a no-signal interjection won't clear the speaker gate)."""
+        if self._pvad is None:
+            return True, None
+        if not frames:
+            return True, 0.0
+        n_target = sum(1 for f in frames if f.is_target)
+        is_target = n_target * 2 >= len(frames)          # majority of the run
+        score = max(f.confidence for f in frames)
+        return is_target, score
 
     def _apply_aec(self, chunk: np.ndarray, state: State) -> np.ndarray:
         """Per-frame AEC during playback (controller.py:819-832). Reads the
@@ -140,23 +170,29 @@ class IngestionWorker:
         rms = _rms(chunk)
         if rms >= self._proximity_rms:
             self._ducked_onset = True
-            await self._bus.emit(E.NearFieldOnset(rms=rms, is_target=True))
+            is_target, _ = self._target_from(self._chunk_frames)
+            await self._bus.emit(E.NearFieldOnset(rms=rms, is_target=is_target))
 
     async def _on_segment(self, seg, state: State) -> None:
         rms = _rms(seg.audio)
+        is_target, pvad_score = self._target_from(self._seg_frames)
+        self._seg_frames = []                            # consume the run
         if state is State.LISTENING:
             prob = await self._endpoint_prob(seg.audio)
             self._stt.set_pending_user_audio(seg.audio)
             await self._bus.emit(E.SegmentEndpointed(
                 duration_ms=seg.duration_ms, rms=rms,
-                is_target=True, endpoint_prob=prob,
+                is_target=is_target, endpoint_prob=prob,
             ))
         elif state is State.EVALUATING:
-            score = await self._speaker_score(seg.audio)
+            # pVAD confidence is the primary speaker_score; ECAPA (off the hot
+            # path) becomes the SafetyNet's job. No pVAD -> legacy ECAPA score.
+            score = pvad_score if pvad_score is not None \
+                else await self._speaker_score(seg.audio)
             self._stt.set_pending_interjection_audio(seg.audio)
             await self._bus.emit(E.InterjectionSegment(
                 duration_ms=seg.duration_ms, rms=rms,
-                is_target=True, speaker_score=score,
+                is_target=is_target, speaker_score=score,
             ))
         # SPEAKING/THINKING/IDLE: onset handled separately; segments are ignored.
 

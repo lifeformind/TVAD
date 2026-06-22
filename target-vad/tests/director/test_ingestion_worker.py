@@ -11,6 +11,21 @@ from modes.director.config import DirectorConfig
 from modes.director.state import State
 from core.vad.silero_vad import SpeechSegment
 from modes.director import events as E
+from modes.director.pvad.types import SpeakerFrame
+
+
+class _FakePvad:
+    """Stand-in PvadWorker: every chunk yields one frame with a fixed verdict."""
+    def __init__(self, is_target, conf=0.8):
+        self._is_target = is_target
+        self._conf = conf
+
+    def update_speaker(self, emb):
+        pass
+
+    def process(self, chunk, ts):
+        return [SpeakerFrame(ts=ts, is_target=self._is_target,
+                             confidence=self._conf, rms=0.1)]
 
 
 class FakeMic:
@@ -60,7 +75,7 @@ def _seg(duration_ms=900.0, level=0.5):
                          start_ms=0.0, end_ms=duration_ms, duration_ms=duration_ms)
 
 
-def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9):
+def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9, pvad=None):
     bus = EventBus()
     stt = MagicMock()
     stt.set_pending_user_audio = MagicMock()
@@ -77,8 +92,57 @@ def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9):
         cfg=DirectorConfig(), proximity_rms=0.02,
         state_getter=lambda: state,
         score_fn=lambda a, b: embedder_score,    # injected cosine (no real ECAPA)
+        pvad=pvad,
     )
     return w, bus, stt
+
+
+@pytest.mark.asyncio
+async def test_pvad_target_makes_segment_is_target_true():
+    seg = _seg()
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
+                              State.LISTENING, pvad=_FakePvad(is_target=True))
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
+    assert len(seps) == 1 and seps[0].is_target is True
+
+
+@pytest.mark.asyncio
+async def test_pvad_bystander_makes_segment_is_target_false():
+    # A non-target speaker's turn must be marked is_target=False so the reducer
+    # ignores it (crowd focus on normal turns).
+    seg = _seg()
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
+                              State.LISTENING, pvad=_FakePvad(is_target=False))
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
+    assert len(seps) == 1 and seps[0].is_target is False
+
+
+@pytest.mark.asyncio
+async def test_pvad_bystander_onset_is_not_target():
+    # A bystander onset during SPEAKING must NOT be flagged target (no duck).
+    seg_audio = np.full(512, 0.5, dtype=np.float32)
+    vad = FakeVad([[]], is_speaking=True)
+    w, bus, stt = make_worker(FakeMic([seg_audio]), vad, State.SPEAKING,
+                              pvad=_FakePvad(is_target=False))
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    onsets = [e for e in evs if isinstance(e, E.NearFieldOnset)]
+    assert len(onsets) == 1 and onsets[0].is_target is False
+
+
+@pytest.mark.asyncio
+async def test_pvad_interjection_speaker_score_comes_from_pvad():
+    seg = _seg()
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
+                              State.EVALUATING, pvad=_FakePvad(is_target=True, conf=0.83))
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    inter = [e for e in evs if isinstance(e, E.InterjectionSegment)]
+    assert len(inter) == 1 and inter[0].speaker_score == pytest.approx(0.83)
 
 
 @pytest.mark.asyncio

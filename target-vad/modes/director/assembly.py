@@ -53,6 +53,39 @@ except Exception:  # pragma: no cover - onnxruntime/pipecat optional
     SmartTurnDetector = None  # type: ignore[assignment,misc]
 
 
+def _build_pvad(primary_embedding, proximity_rms: float, tb_cfg: dict):
+    """Build the Plan-05 crowd-focus PvadWorker, or None for the legacy
+    single-speaker path (is_target=True). Returns None when there is no enrolled
+    embedding to condition on, when crowd_focus is disabled, or when the ONNX
+    model can't load (offline / uncached) — the kiosk still runs, just without
+    bystander rejection. The PvadWorker's own RMS crash-fallback covers a model
+    that loads but fails mid-session."""
+    if primary_embedding is None:
+        return None
+    cf = tb_cfg.get("crowd_focus", {})
+    if not cf.get("enabled", True):
+        return None
+    try:
+        from modes.director.pvad.loader import load_pvad
+        from modes.director.pvad.stream import VADStream
+        from modes.director.pvad.worker import PvadWorker
+
+        session = load_pvad()
+        stream = VADStream(session, threshold=float(cf.get("threshold", 0.5)))
+
+        def _emit(event, payload):
+            print(f"[director] pvad {event}: {payload}", file=sys.stderr, flush=True)
+
+        worker = PvadWorker(stream, proximity_rms=proximity_rms, emit=_emit)
+        worker.update_speaker(primary_embedding)
+        _diag("pVAD crowd-focus ENABLED")
+        return worker
+    except Exception as exc:   # noqa: BLE001 — degrade to legacy is_target=True
+        print(f"[director] pVAD unavailable -> FOCUS via is_target=True fallback: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return None
+
+
 def _director_config_from(tb_cfg: dict) -> DirectorConfig:
     """Map the kiosk.talkback.* config onto the frozen DirectorConfig. Pulls the
     same keys the reducer's thresholds came from (spec section 5/6)."""
@@ -207,12 +240,13 @@ def build_director_runtime(
         playback=playback, bus=bus,
     )
 
+    pvad = _build_pvad(handoff.primary_embedding, proximity_rms, tb_cfg)
     ingestion = IngestionWorker(
         mic=handoff.mic, vad=handoff.vad, aec=aec, turn_detector=turn_detector,
         embedder=handoff.embedder, primary_embedding=handoff.primary_embedding,
         stt_worker=stt_worker, playback=playback, bus=bus, cfg=cfg,
         proximity_rms=proximity_rms, state_getter=lambda: director.state,
-        score_fn=cosine_similarity,
+        score_fn=cosine_similarity, pvad=pvad,
     )
 
     watchdog = AsyncWatchdog(
