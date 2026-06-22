@@ -27,8 +27,6 @@ kiosk:
   wake_phrase: "hey_mycroft"
   wake_threshold: 0.5
   awaiting_speech_timeout_s: 15
-  session_silence_timeout_s: 30
-  session_hard_timeout_s: 300
   decision_smoother:
     window_size: 3
     min_matches: 2
@@ -36,19 +34,16 @@ kiosk:
 
   talkback_enabled: false
 
-  watchdog:
-    tick_ms: 500
-
   talkback:
     sample_rate_hz: 16000
     frame_ms: 10
     output_device: null
     input_device: null
 
-    # Active-conversation timeouts, read by TalkbackController in --talkback mode.
-    # silence_timeout_s: how long a pause between your turns ends the session.
-    # hard_timeout_s: absolute session cap regardless of activity.
-    # (The kiosk.session_*_timeout_s values above govern the non-talkback path.)
+    # Active-conversation timeouts, owned by the Director (the SOLE timeout
+    # authority — spec section 4a). silence_timeout_s: how long a pause between
+    # your turns ends the session. hard_timeout_s: absolute session cap. The old
+    # kiosk.session_*_timeout_s keys (a second, racing authority) are DELETED.
     silence_timeout_s: 30
     hard_timeout_s: 300
 
