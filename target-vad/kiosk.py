@@ -113,9 +113,8 @@ def _build_runtime(config: dict) -> _LazyDirectorRuntime:
 
     stt_cfg = tb_cfg.get("stt", {})
     stt = StreamingStt(
-        model=stt_cfg.get("model", "base"),
-        compute_type=stt_cfg.get("compute_type", "int8"),
-        device=stt_cfg.get("device", "cpu"),
+        model=stt_cfg.get("model", "base.en"),
+        device=stt_cfg.get("device", "cuda"),
     )
     llm_cfg = tb_cfg.get("llm", {})
     llm = LlmClient(
