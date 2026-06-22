@@ -111,6 +111,20 @@ class EnrollmentStore:
             return len(np.load(utt_path))
         return 0
 
+    def holdout_utterance_embedding(self, user_id: str) -> np.ndarray:
+        """Return ONE per-utterance embedding for verify-before-serve (Plan 05).
+
+        Must be called BEFORE finalize_enrollment, which deletes the utterances
+        file (os.remove at the end of finalize). Returns the last recorded
+        utterance row so the Director can score cosine(primary, holdout) at
+        session start. Raises FileNotFoundError if no utterances exist.
+        """
+        utt_path = self._utterances_path(user_id)
+        if not os.path.exists(utt_path):
+            raise FileNotFoundError(f"No utterances found for '{user_id}'")
+        utterances = np.load(utt_path)
+        return np.asarray(utterances[-1], dtype=np.float32)
+
     # ---- lookup ---------------------------------------------------------
 
     def get(self, user_id: str) -> Optional[np.ndarray]:
