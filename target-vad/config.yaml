@@ -52,11 +52,16 @@ kiosk:
       suppression_level: "high"
 
     stt:
-      model: "base"
-      compute_type: "int8"
-      device: "cpu"
-      partials_every_ms: 300
+      # Re-backed off faster-whisper (no aarch64 CUDA wheel on GB10) onto
+      # openai-whisper (torch, CUDA). See docs/notes/2026-06-22-stt-backend.md.
+      backend: "openai-whisper"   # "openai-whisper" (proven on GB10) | "nemo" (Plan 04 Task 7)
+      model: "base.en"            # "tiny" for the lowest-latency reflex; "base.en" default
+      device: "cuda"              # GB10 CUDA; fallback is NOT supported (faster-whisper banned)
+      partials_every_ms: 300      # reserved (no streaming-partial path in V1; full-segment STT)
       end_of_utterance_tail_ms: 400
+      # mean_word_prob from StreamingStt feeds the Director's empty/low-confidence
+      # RESTORE guard: transcripts with mean_word_prob < barge_in.conf_floor (0.5)
+      # are treated as non-content and RESTORE rather than CUT (spec Section 6).
 
     llm:
       base_url: "http://127.0.0.1:8080/v1"
