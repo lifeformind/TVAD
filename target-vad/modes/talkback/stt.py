@@ -37,7 +37,7 @@ class StreamingStt:
     def _ensure_model(self) -> None:
         if self._model is not None:
             return
-        import whisper  # openai-whisper (torch-native), NOT faster_whisper
+        import whisper  # openai-whisper (torch-native), NOT the CTranslate2 backend
 
         self._model = whisper.load_model(self._model_name, device=self._device)
 

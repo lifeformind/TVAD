@@ -112,3 +112,15 @@ async def test_transcribe_segment_returns_transcript_result():
     assert isinstance(out, TranscriptResult)
     assert out.text == "hi"
     assert out.mean_word_prob == pytest.approx(0.95)
+
+
+def test_stt_module_does_not_import_faster_whisper():
+    """faster-whisper has no aarch64 CUDA wheel; it must stay out of stt.py."""
+    import inspect
+
+    import modes.talkback.stt as stt_mod
+
+    src = inspect.getsource(stt_mod)
+    assert "faster_whisper" not in src
+    assert "WhisperModel" not in src  # the faster-whisper class name
+    assert "import whisper" in src    # openai-whisper is the backend
