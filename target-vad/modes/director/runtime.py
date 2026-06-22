@@ -23,6 +23,17 @@ def _diag(msg: str) -> None:
         print(f"[DIAG runtime] {msg}", file=sys.stderr, flush=True)
 
 
+def _event_text(event) -> str:
+    """Surface the human-readable text an event carries, so a live run shows what
+    the ASR heard and what the TTS is about to say (else the log proves the FSM
+    works but not that the words were caught right)."""
+    for attr in ("text", "assistant_text"):
+        val = getattr(event, attr, None)
+        if val:
+            return f" text={val!r}"
+    return ""
+
+
 class DirectorRuntime:
     def __init__(self, director, bus, watchdog, ingestion, stt_worker,
                  generation, playback, clock):
@@ -59,7 +70,7 @@ class DirectorRuntime:
                 commands = self._director.dispatch(event)
                 if _DIAG and type(event).__name__ != "Tick":
                     _diag(f"event={type(event).__name__} -> state={self._director.state.name}"
-                          f" cmds={[type(c).__name__ for c in commands]}")
+                          f" cmds={[type(c).__name__ for c in commands]}{_event_text(event)}")
                 for command in commands:
                     await self._route(command)
         finally:
