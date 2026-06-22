@@ -16,7 +16,7 @@ def test_near_field_target_onset_ducks_and_evaluates():
     ctx = _ctx()
     state, cmds = reduce(State.SPEAKING, ctx, E.NearFieldOnset(rms=0.5, is_target=True))
     assert state is State.EVALUATING
-    assert cmds == [C.Duck(0.15)]
+    assert cmds == [C.Duck(0.35)]
     assert ctx.ducked is True
 
 
