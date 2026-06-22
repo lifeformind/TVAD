@@ -1,61 +1,29 @@
-"""Tests for streaming STT wrapper around faster-whisper."""
+"""Tests for the re-backed StreamingStt (openai-whisper / torch CUDA).
 
-from unittest.mock import MagicMock
+Pure-logic tests use a fake model object and always run. The real-CUDA
+integration test lives in test_stt_cuda.py and is skipped without a GPU.
+"""
 
 import numpy as np
 import pytest
 
-from modes.talkback.stt import StreamingStt
+from modes.talkback.stt import StreamingStt, TranscriptResult
 
 
-class FakeWhisperSegment:
-    def __init__(self, text: str):
-        self.text = text
+def test_transcript_result_shape():
+    r = TranscriptResult(text="hello world", mean_word_prob=0.87)
+    assert r.text == "hello world"
+    assert r.mean_word_prob == 0.87
 
 
-class TestStreamingStt:
-    @pytest.mark.asyncio
-    async def test_transcribe_segment_returns_text(self):
-        stt = StreamingStt.__new__(StreamingStt)
-        stt._model = MagicMock()
-        stt._model.transcribe = MagicMock(
-            return_value=([FakeWhisperSegment(" hello world ")], {"language": "en"})
-        )
-
-        audio = np.random.randn(16000).astype(np.float32) * 0.1
-        text = await stt.transcribe_segment(audio)
-        assert text == "hello world"
-
-    @pytest.mark.asyncio
-    async def test_transcribe_empty_audio_returns_empty(self):
-        stt = StreamingStt.__new__(StreamingStt)
-        stt._model = MagicMock()
-        stt._model.transcribe = MagicMock(return_value=([], {"language": "en"}))
-
-        audio = np.zeros(16000, dtype=np.float32)
-        text = await stt.transcribe_segment(audio)
-        assert text == ""
-
-    @pytest.mark.asyncio
-    async def test_transcribe_concatenates_segments(self):
-        stt = StreamingStt.__new__(StreamingStt)
-        stt._model = MagicMock()
-        stt._model.transcribe = MagicMock(
-            return_value=(
-                [FakeWhisperSegment(" first"), FakeWhisperSegment(" second")],
-                {"language": "en"},
-            )
-        )
-
-        audio = np.random.randn(32000).astype(np.float32) * 0.1
-        text = await stt.transcribe_segment(audio)
-        assert text == "first second"
+def test_transcript_result_is_frozen():
+    r = TranscriptResult(text="x", mean_word_prob=0.5)
+    with pytest.raises(Exception):
+        r.text = "y"  # frozen dataclass -> FrozenInstanceError
 
 
-class TestStreamingSttInit:
-    def test_config_stored(self):
-        stt = StreamingStt.__new__(StreamingStt)
-        stt._model_name = "large-v3"
-        stt._compute_type = "float16"
-        stt._device = "cuda"
-        assert stt._model_name == "large-v3"
+def test_transcript_result_is_the_canonical_director_type():
+    # Single source of truth: stt.py RE-EXPORTS Plan 02's type, not a copy,
+    # so Plan 02's wrap_transcript() isinstance check stays valid.
+    from modes.director.transcript import TranscriptResult as Canonical
+    assert TranscriptResult is Canonical

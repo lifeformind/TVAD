@@ -1,12 +1,20 @@
-"""Streaming STT wrapper around faster-whisper.
+"""Streaming STT wrapper, re-backed onto openai-whisper (torch, CUDA).
 
-Accepts completed speech segments (from VAD) and returns final transcripts.
-Runs faster-whisper inference in a thread pool to avoid blocking the async loop.
+faster-whisper / CTranslate2 has NO aarch64 CUDA wheel on this GB10 (DGX Spark)
+and falls back to ~270ms CPU. This module keeps the StreamingStt class name and
+async transcribe_segment interface (callers unchanged) but swaps the internals to
+openai-whisper, and returns the canonical TranscriptResult(text, mean_word_prob)
+(owned by modes/director/transcript.py, Plan 02) so the Director can RESTORE on
+empty / low-confidence transcripts (spec Section 6).
+
+See docs/notes/2026-06-22-stt-backend.md for the backend-selection verdict.
 """
 
 import asyncio
 
 import numpy as np
+
+from modes.director.transcript import TranscriptResult  # canonical type (Plan 02)
 
 
 class StreamingStt:
