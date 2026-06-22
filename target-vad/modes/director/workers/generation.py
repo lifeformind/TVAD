@@ -15,6 +15,7 @@ import sys
 from modes.director.bus import EventBus
 from modes.director import events as E
 from modes.director import commands as C
+from modes.talkback.speech_text import strip_markdown_for_speech
 
 _DIAG = bool(os.environ.get("TVAD_DIAG"))
 
@@ -86,7 +87,7 @@ class GenerationWorker:
         try:
             async for token in self._llm.stream(messages):
                 full.append(token)
-                chunk = chunker.feed(token)
+                chunk = strip_markdown_for_speech(chunker.feed(token) or "")
                 if chunk:
                     first_frame_sent = await self._speak_chunk(chunk, gen_id,
                                                                first_frame_sent)
@@ -94,7 +95,7 @@ class GenerationWorker:
                     # report spoken-so-far so a barge-in records it (reducer
                     # tracks partial_response -> keeps history alternating)
                     await self._bus.emit(E.AssistantPartial(gen_id, " ".join(spoken)))
-            remaining = chunker.flush()
+            remaining = strip_markdown_for_speech(chunker.flush() or "")
             if remaining:
                 first_frame_sent = await self._speak_chunk(remaining, gen_id,
                                                            first_frame_sent)

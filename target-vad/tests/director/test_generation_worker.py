@@ -94,6 +94,32 @@ async def test_cut_drains_playback_cancels_llm_and_bumps_gen():
 
 
 @pytest.mark.asyncio
+async def test_markdown_is_stripped_before_tts_and_in_partials():
+    # gemma emits markdown emphasis; it must never reach the TTS (it would be
+    # vocalized) nor the spoken-so-far partials (they feed barge-in history).
+    w, bus, tts, pw = make_worker(["Find the *area* ", "under **that** line. "])
+    await w.execute(C.StartGeneration(gen_id=1, messages=[], steer=None))
+    spoken = [call.args[0] for call in tts.synthesize.call_args_list]
+    assert spoken, "expected at least one synthesized chunk"
+    assert all("*" not in s for s in spoken), spoken
+    assert any("area" in s and "that" in s for s in spoken)
+    events = []
+    while bus.qsize():
+        events.append(await bus.get())
+    partials = [e for e in events if isinstance(e, E.AssistantPartial)]
+    assert partials and all("*" not in p.text for p in partials)
+
+
+@pytest.mark.asyncio
+async def test_chunk_that_is_only_markup_is_not_spoken():
+    # a chunk that strips down to empty (e.g. a lone bullet) must not be synthesized
+    w, bus, tts, pw = make_worker(["* ", "real content here. "])
+    await w.execute(C.StartGeneration(gen_id=1, messages=[], steer=None))
+    spoken = [call.args[0] for call in tts.synthesize.call_args_list]
+    assert all(s.strip() for s in spoken), spoken  # no empty/whitespace-only synth
+
+
+@pytest.mark.asyncio
 async def test_no_first_frame_when_llm_yields_nothing():
     w, bus, tts, pw = make_worker([])
     await w.execute(C.StartGeneration(gen_id=3, messages=[], steer=None))
