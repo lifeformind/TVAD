@@ -55,7 +55,7 @@ kiosk:
       # Re-backed off faster-whisper (no aarch64 CUDA wheel on GB10) onto
       # openai-whisper (torch, CUDA). See docs/notes/2026-06-22-stt-backend.md.
       backend: "openai-whisper"   # "openai-whisper" (proven on GB10) | "nemo" (Plan 04 Task 7)
-      model: "base.en"            # "tiny" for the lowest-latency reflex; "base.en" default
+      model: "small.en"           # GB10 p95: tiny 67ms / base.en 84ms / small.en 189ms / medium.en 415ms (word_timestamps on, self.wav 3s). small.en = accuracy/latency balance for uncommon words
       device: "cuda"              # GB10 CUDA; fallback is NOT supported (faster-whisper banned)
       partials_every_ms: 300      # reserved (no streaming-partial path in V1; full-segment STT)
       end_of_utterance_tail_ms: 400
