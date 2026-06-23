@@ -138,3 +138,40 @@ def test_run_drives_first_segment_to_a_full_turn_and_returns_result():
     result = factory.run(handoff)
     assert isinstance(result, DirectorResult)
     assert result.reason in ("silence_timeout", "hard_timeout", "stopped")
+
+
+def _pvad_cached():
+    try:
+        from huggingface_hub import hf_hub_download
+        hf_hub_download(repo_id="FireRedTeam/FireRedChat-pvad",
+                        filename="pvad.onnx", local_files_only=True)
+        return True
+    except Exception:
+        return False
+
+
+def test_build_pvad_returns_real_worker_not_silent_fallback():
+    """Regression for the live NameError: _build_pvad called an undefined _diag(),
+    which threw -> caught -> silent fallback to is_target=True (crowd focus OFF the
+    whole session). The fake-pVAD ingestion tests never exercised _build_pvad, so
+    this drives it directly and asserts a real worker comes back."""
+    from modes.director.assembly import _build_pvad
+    emb = np.random.RandomState(0).randn(192).astype(np.float32)
+    w = _build_pvad(emb, proximity_rms=0.02, tb_cfg={"crowd_focus": {"enabled": True}})
+    if not _pvad_cached():
+        import pytest
+        pytest.skip("pvad.onnx not cached")
+    assert w is not None and type(w).__name__ == "PvadWorker"
+    out = w.process(np.zeros(3200, dtype=np.float32), ts=0.0)
+    assert out and all(hasattr(f, "is_target") for f in out)
+
+
+def test_build_pvad_disabled_returns_none():
+    from modes.director.assembly import _build_pvad
+    emb = np.ones(192, dtype=np.float32)
+    assert _build_pvad(emb, 0.02, {"crowd_focus": {"enabled": False}}) is None
+
+
+def test_build_pvad_no_embedding_returns_none():
+    from modes.director.assembly import _build_pvad
+    assert _build_pvad(None, 0.02, {"crowd_focus": {"enabled": True}}) is None

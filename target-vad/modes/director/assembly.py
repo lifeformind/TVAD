@@ -78,7 +78,7 @@ def _build_pvad(primary_embedding, proximity_rms: float, tb_cfg: dict):
 
         worker = PvadWorker(stream, proximity_rms=proximity_rms, emit=_emit)
         worker.update_speaker(primary_embedding)
-        _diag("pVAD crowd-focus ENABLED")
+        print("[director] pVAD crowd-focus ENABLED", file=sys.stderr, flush=True)
         return worker
     except Exception as exc:   # noqa: BLE001 — degrade to legacy is_target=True
         print(f"[director] pVAD unavailable -> FOCUS via is_target=True fallback: "
