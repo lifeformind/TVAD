@@ -1,5 +1,6 @@
 import pathlib
 import importlib.util
+import numpy as np
 
 # Import the bench module by path (it lives outside any package).
 _spec = importlib.util.spec_from_file_location(
@@ -41,3 +42,24 @@ def test_presence_debouncer_hysteresis():
     assert d.update(False, 1.5) == "present"     # brief miss, < 2s -> still present
     assert d.update(False, 3.0) == "present"     # 1.5s of absence (<2s from first miss)
     assert d.update(False, 3.6) == "absent"      # >=2s continuous absence -> absent
+
+
+def test_cosine_basic():
+    assert abs(vpp.cosine(np.array([1.0, 0]), np.array([1.0, 0])) - 1.0) < 1e-6
+    assert abs(vpp.cosine(np.array([1.0, 0]), np.array([0, 1.0]))) < 1e-6
+
+
+def test_separation_report_clean_split():
+    # self scores high, cross scores low, fully separable.
+    rep = vpp.separation_report([0.7, 0.8, 0.75], [0.1, 0.2, 0.15])
+    assert rep["separated"] is True
+    assert rep["self_accept_rate"] == 1.0
+    assert rep["cross_reject_rate"] == 1.0
+    assert rep["cross_max"] < rep["threshold"] <= rep["self_min"]
+
+
+def test_separation_report_overlap_not_separated():
+    # overlapping distributions -> no threshold gives 100/100.
+    rep = vpp.separation_report([0.4, 0.55, 0.3], [0.35, 0.5, 0.45])
+    assert rep["separated"] is False
+    assert min(rep["self_accept_rate"], rep["cross_reject_rate"]) < 1.0

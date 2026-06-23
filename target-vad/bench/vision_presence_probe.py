@@ -167,6 +167,101 @@ def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float
           f"proc_cpu={cpu:.1f}% present_fraction={present_frames/max(total,1):.2f}")
 
 
+def cosine(a, b) -> float:
+    a = np.asarray(a, dtype=np.float64).ravel()
+    b = np.asarray(b, dtype=np.float64).ravel()
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    return float(np.dot(a, b) / (na * nb)) if na and nb else 0.0
+
+
+def separation_report(self_scores, cross_scores) -> dict:
+    """Sweep candidate thresholds over the score range; pick the one maximizing
+    min(accept-self, reject-stranger). `separated` is True only when BOTH reach 1.0
+    on this data (the Half-3 GO bar)."""
+    s = np.asarray(self_scores, dtype=np.float64)
+    c = np.asarray(cross_scores, dtype=np.float64)
+    cands = np.unique(np.concatenate([s, c]))
+    best = {"threshold": 0.0, "self_accept_rate": 0.0, "cross_reject_rate": 0.0}
+    best_min = -1.0
+    for t in cands:
+        sa = float(np.mean(s >= t)) if s.size else 0.0
+        cr = float(np.mean(c < t)) if c.size else 0.0
+        if min(sa, cr) > best_min:
+            best_min = min(sa, cr)
+            best = {"threshold": float(t), "self_accept_rate": sa, "cross_reject_rate": cr}
+    best["self_min"] = float(s.min()) if s.size else 0.0
+    best["cross_max"] = float(c.max()) if c.size else 0.0
+    best["separated"] = bool(best["self_accept_rate"] == 1.0 and best["cross_reject_rate"] == 1.0)
+    return best
+
+
+def _largest_face(det, frame):
+    """Return the YuNet face row (15-vec) with the largest box, or None."""
+    h, w = frame.shape[:2]
+    det.setInputSize((w, h))
+    _, faces = det.detect(frame)
+    if faces is None or len(faces) == 0:
+        return None
+    return max(faces, key=lambda f: float(f[2]) * float(f[3]))
+
+
+def _embed(det, rec, frame):
+    """YuNet-detect the largest face, SFace-align+embed -> 128-vec (or None)."""
+    f = _largest_face(det, frame)
+    if f is None:
+        return None
+    aligned = rec.alignCrop(frame, f)
+    return rec.feature(aligned).ravel().copy()
+
+
+def cmd_identity(index, width, height, enroll_seconds, test_seconds) -> None:
+    """Half 3: enroll person A, then measure self-similarity (A) and cross-similarity
+    (a DIFFERENT person B) against A's mean embedding. Prints the separation report."""
+    import cv2
+    ydet = cv2.FaceDetectorYN.create(str(ensure_model(YUNET_URL, CACHE / "yunet.onnx")),
+                                     "", (width, height), 0.7, 0.3, 50)
+    rec = cv2.FaceRecognizerSF.create(str(ensure_model(SFACE_URL, CACHE / "sface.onnx")), "")
+    cap = cv2.VideoCapture(index)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+    def collect(label, seconds):
+        embs, t0 = [], time.monotonic()
+        print(f"\n>>> {label}: stand at the kiosk for {seconds:.0f}s ...")
+        while time.monotonic() - t0 < seconds:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            e = _embed(ydet, rec, frame)
+            if e is not None:
+                embs.append(e)
+            time.sleep(0.2)        # ~5 fps is plenty
+        print(f"    collected {len(embs)} embeddings")
+        return embs
+
+    enroll = collect("ENROLL person A", enroll_seconds)
+    if not enroll:
+        print("[identity] no face during enroll — abort", file=sys.stderr)
+        cap.release()
+        return
+    ref = np.mean(np.stack(enroll), axis=0)
+    self_e = collect("TEST person A again (self)", test_seconds)
+    cross_e = collect("TEST person B (stranger)", test_seconds)
+    cap.release()
+
+    self_scores = [cosine(e, ref) for e in self_e]
+    cross_scores = [cosine(e, ref) for e in cross_e]
+    rep = separation_report(self_scores, cross_scores)
+    print(f"\n[identity] self  n={len(self_scores)} "
+          f"min={min(self_scores, default=0):.3f} mean={np.mean(self_scores or [0]):.3f}")
+    print(f"[identity] cross n={len(cross_scores)} "
+          f"max={max(cross_scores, default=0):.3f} mean={np.mean(cross_scores or [0]):.3f}")
+    print(f"[identity] report: {rep}")
+    print(f"[identity] HALF-3 {'GO' if rep['separated'] else 'NO-GO'} "
+          f"(threshold={rep['threshold']:.3f}, "
+          f"self_accept={rep['self_accept_rate']:.2f}, cross_reject={rep['cross_reject_rate']:.2f})")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -181,6 +276,11 @@ def main() -> None:
                                ("--height", int, 240), ("--seconds", float, 30.0),
                                ("--fps", float, 3.0)]:
         pr.add_argument(name, type=typ, default=default)
+    idp = sub.add_parser("identity")
+    for name, typ, default in [("--index", int, 0), ("--width", int, 320),
+                               ("--height", int, 240), ("--enroll-seconds", float, 8.0),
+                               ("--test-seconds", float, 8.0)]:
+        idp.add_argument(name, type=typ, default=default)
     args = p.parse_args()
     if args.cmd == "deps":
         for k, v in probe_deps().items():
@@ -189,6 +289,9 @@ def main() -> None:
         cmd_capture(args.index, args.width, args.height, args.seconds)
     elif args.cmd == "presence":
         cmd_presence(args.index, args.width, args.height, args.seconds, args.fps)
+    elif args.cmd == "identity":
+        cmd_identity(args.index, args.width, args.height,
+                     args.enroll_seconds, args.test_seconds)
 
 
 if __name__ == "__main__":
