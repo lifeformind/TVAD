@@ -149,14 +149,17 @@ kiosk:
         rms_threshold: null        # null = auto-calibrate from the primary enrollment RMS
         rms_factor: 0.5
 
-    # Crowd focus (Plan 05): a personal-VAD (FireRedChat pVAD, ONNX/CPU)
-    # conditioned on the enrolled ECAPA embedding makes is_target real — only the
-    # enrolled speaker's turns/onsets are served; bystanders are ignored. If the
-    # model can't load (offline/uncached) the kiosk falls back to is_target=True
-    # (legacy single-speaker behavior). The pVAD's own RMS crash-fallback covers a
-    # mid-session failure (is_target := rms >= proximity_rms).
+    # Crowd focus (Plan 05): DISABLED — the FireRedChat pVAD's spkemb conditioning
+    # is inert with our speechbrain/spkrec-ecapa-voxceleb embeddings, so it provides
+    # NO speaker selectivity (degenerates to a plain energy VAD; bystanders leak).
+    # Root-caused 2026-06-23: the encoder + full recipe match FireRedChat's public
+    # plugin exactly, yet target ~0.61 vs bystander ~0.55 (both > 0.5 threshold) —
+    # not a preprocessing bug, the conditioning is genuinely too weak to gate. See
+    # memory pvad-conditioning-inert. With this off, _build_pvad returns None and
+    # the kiosk runs proximity-RMS-only (is_target=True); crowd focus is being
+    # rebuilt on ECAPA accumulated-window verification (turn_gate, below).
     crowd_focus:
-      enabled: true
+      enabled: false
       threshold: 0.5             # per-frame target-speaker prob >= this => target
 
     # Interruption-resume: after answering an interruption, the AI offers to
