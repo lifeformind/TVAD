@@ -119,9 +119,12 @@ class PresenceDebouncer:
 
 
 def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float,
-                 preview: bool = False) -> None:
+                 preview: bool = False, debug: bool = False,
+                 min_area_frac: float = 0.015) -> None:
     """Half 2: YuNet detect at `fps`, apply zone/size filter + debounce, and report
-    detect latency, achieved fps, CPU%, and present/absent reliability."""
+    detect latency, achieved fps, CPU%, and present/absent reliability. With
+    debug=True, logs raw YuNet face count + the largest box's geometry + the
+    zone/size verdict each second so a no-detect vs filtered-out can be told apart."""
     import cv2
     import psutil
     model = ensure_model(YUNET_URL, CACHE / "yunet.onnx")
@@ -130,6 +133,9 @@ def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float
     cap = cv2.VideoCapture(index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    # NB: do NOT set CAP_PROP_FPS here — on this UVC camera it silently switches
+    # capture mode (resolution/exposure) and YuNet then detects nothing. CPU is kept
+    # low instead by grab()-ing (no decode) between samples in the loop below.
     _gate("[Half 2] PRESENCE — stand in front of the kiosk at arm's length.\n"
           "You will be told to STEP OUT near the end so we can confirm 'absent'.")
     _countdown("presence")
@@ -141,27 +147,29 @@ def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float
     last_print = -1.0
     t0, next_t = time.monotonic(), time.monotonic()
     while time.monotonic() - t0 < seconds:
+        now = time.monotonic()
+        if now < next_t:
+            cap.grab()        # flush a frame without decoding (cheap) between samples
+            continue
+        next_t = now + period
         ok, frame = cap.read()
         if not ok:
             break
         now = time.monotonic()
-        if now < next_t:
-            continue
-        next_t = now + period
         h, w = frame.shape[:2]
         det.setInputSize((w, h))
         ts = time.monotonic()
         _, faces = det.detect(frame)
         lat.append((time.monotonic() - ts) * 1000)
+        raw_boxes = ([(float(f[0]), float(f[1]), float(f[2]), float(f[3])) for f in faces]
+                     if faces is not None else [])
         detected = False
         box = None
-        if faces is not None:
-            for f in faces:
-                candidate = (float(f[0]), float(f[1]), float(f[2]), float(f[3]))
-                if box_in_zone(candidate, w, h):
-                    detected = True
-                    box = candidate
-                    break
+        for candidate in raw_boxes:
+            if box_in_zone(candidate, w, h, min_area_frac=min_area_frac):
+                detected = True
+                box = candidate
+                break
         state = deb.update(detected, now)
         total += 1
         present_frames += 1 if state == "present" else 0
@@ -170,6 +178,17 @@ def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float
             remaining = seconds - (now - t0)
             print(f"[presence] elapsed={now-t0:5.1f}s remaining={remaining:4.1f}s "
                   f"detected={int(detected)} state={state}", flush=True)
+            if debug:
+                if raw_boxes:
+                    bx = max(raw_boxes, key=lambda b: b[2] * b[3])
+                    cx, cy = (bx[0] + bx[2] / 2) / w, (bx[1] + bx[3] / 2) / h
+                    af = (bx[2] * bx[3]) / (w * h)
+                    print(f"[debug] faces={len(raw_boxes)} largest=({bx[0]:.0f},{bx[1]:.0f},"
+                          f"{bx[2]:.0f},{bx[3]:.0f}) center=({cx:.2f},{cy:.2f}) "
+                          f"area_frac={af:.3f} in_zone={0.2 <= cx <= 0.8} "
+                          f"big_enough={af >= min_area_frac}", flush=True)
+                else:
+                    print("[debug] faces=0 (YuNet found no face this frame)", flush=True)
             if 4.0 < remaining <= 5.0:
                 print("\n>>> STEP OUT OF FRAME NOW — verifying 'absent' <<<\n", flush=True)
         if preview:
@@ -367,6 +386,8 @@ def main() -> None:
                                ("--fps", float, 3.0)]:
         pr.add_argument(name, type=typ, default=default)
     pr.add_argument("--preview", action="store_true")
+    pr.add_argument("--debug", action="store_true")
+    pr.add_argument("--min-area-frac", type=float, default=0.015)
     idp = sub.add_parser("identity")
     for name, typ, default in [("--index", int, 0), ("--width", int, 320),
                                ("--height", int, 240), ("--enroll-seconds", float, 8.0),
@@ -381,7 +402,8 @@ def main() -> None:
         cmd_capture(args.index, args.width, args.height, args.seconds)
     elif args.cmd == "presence":
         cmd_presence(args.index, args.width, args.height, args.seconds, args.fps,
-                     preview=args.preview)
+                     preview=args.preview, debug=args.debug,
+                     min_area_frac=args.min_area_frac)
     elif args.cmd == "identity":
         cmd_identity(args.index, args.width, args.height,
                      args.enroll_seconds, args.test_seconds, preview=args.preview)

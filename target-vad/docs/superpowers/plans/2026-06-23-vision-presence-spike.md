@@ -668,3 +668,193 @@ Present the verdict. If GO (or Tier-1-only GO), the next action is to **brainsto
 **2. Placeholder scan:** Live-measurement steps intentionally leave numeric *results* to the run (that is the spike's output), but every step has concrete commands, code, and explicit GO criteria — no "TBD"/"add error handling"/"similar to". The verdict note has brackets because it is a fill-in-on-run artifact, which is correct. ✓
 
 **3. Type consistency:** `box` is `(x,y,w,h)` in `box_in_zone`/`iou`/`cmd_presence`. `separation_report` keys (`threshold`, `self_accept_rate`, `cross_reject_rate`, `self_min`, `cross_max`, `separated`) match the tests and `cmd_identity` usage. `ensure_model(url, dest)`, `cosine(a,b)` signatures consistent across tasks. YuNet/SFace created via `cv2.FaceDetectorYN.create` / `cv2.FaceRecognizerSF.create` consistently. ✓
+
+---
+
+### Task 5: Guided operator prompts for the live runs (UX, added on request)
+
+**Why:** the live runs (Half 2 step-out timing; Half 3 person A → person B swap) are easy to botch without clear cues. Add input-gated phase prompts, per-second on-screen status, an explicit "STEP OUT NOW" cue, and an optional `--preview` camera window with on-frame overlay. No new pure logic; the 7 existing unit tests must still pass and module import must stay cv2-free at load.
+
+**Files:**
+- Modify: `bench/vision_presence_probe.py` (add prompt helpers; weave into `cmd_presence` + `cmd_identity`; add `--preview` flag)
+- Test: `tests/bench/test_vision_presence_probe.py` (one CI-safe test for `_supports_input`/`_gate` non-interactive no-op)
+
+**Interfaces:**
+- Consumes: existing `cmd_presence`, `cmd_identity`, `box_in_zone`, `_largest_face`, `_embed`.
+- Produces: `_supports_input() -> bool`; `_gate(message: str) -> None` (pauses for Enter when interactive, else prints + continues); `_countdown(label: str, secs: int = 3) -> None`; `_draw_overlay(frame, lines, box=None)`; `_show(window, frame) -> bool`. New `--preview` store_true arg on `presence` and `identity`.
+
+- [ ] **Step 1: Write a CI-safe failing test for the non-interactive gate**
+
+```python
+# append to tests/bench/test_vision_presence_probe.py
+def test_gate_is_noop_when_non_interactive(monkeypatch, capsys):
+    # Force non-interactive stdin; _gate must print the message and NOT block.
+    monkeypatch.setattr(vpp.sys.stdin, "isatty", lambda: False, raising=False)
+    vpp._gate("PERSON A: stand at the kiosk")     # must return immediately
+    out = capsys.readouterr().out
+    assert "PERSON A: stand at the kiosk" in out
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `PYTHONPATH=. pytest tests/bench/test_vision_presence_probe.py::test_gate_is_noop_when_non_interactive -v`
+Expected: FAIL (`_gate`/`_supports_input` not defined).
+
+- [ ] **Step 3: Add the prompt + preview helpers (above `main()`)**
+
+```python
+def _supports_input() -> bool:
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def _gate(message: str) -> None:
+    """Pause until the operator presses Enter so the right person is in frame
+    before a phase. Prints + continues (no block) when stdin isn't interactive."""
+    print("\n" + "=" * 64 + f"\n{message}\n" + "=" * 64, flush=True)
+    if _supports_input():
+        try:
+            input(">>> Press Enter to start... ")
+        except EOFError:
+            pass
+
+
+def _countdown(label: str, secs: int = 3) -> None:
+    for k in range(secs, 0, -1):
+        print(f"[{label}] starting in {k}...", flush=True)
+        time.sleep(1.0)
+
+
+def _draw_overlay(frame, lines, box=None):
+    import cv2
+    if box is not None:
+        x, y, w, h = (int(v) for v in box)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    yy = 24
+    for ln in lines:
+        cv2.putText(frame, ln, (10, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (0, 255, 255), 2, cv2.LINE_AA)
+        yy += 26
+    return frame
+
+
+def _show(window: str, frame) -> bool:
+    """Show a preview frame; return False if no display (caller disables preview)."""
+    import cv2
+    try:
+        cv2.imshow(window, frame)
+        cv2.waitKey(1)
+        return True
+    except Exception:
+        return False
+```
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `PYTHONPATH=. pytest tests/bench/test_vision_presence_probe.py::test_gate_is_noop_when_non_interactive -v`
+Expected: PASS.
+
+- [ ] **Step 5: Weave guidance into `cmd_presence`**
+
+Add a `preview: bool = False` parameter. Before the loop:
+```python
+    _gate("[Half 2] PRESENCE — stand in front of the kiosk at arm's length.\n"
+          "You will be told to STEP OUT near the end so we can confirm 'absent'.")
+    _countdown("presence")
+```
+Inside the loop, replace the bare per-sample print with a once-per-second status line that also fires the step-out cue and (optionally) a preview frame:
+```python
+        # ... after computing `state`, `detected`, frame `w,h`, and the matched `box` (or None):
+        remaining = seconds - (now - t0)
+        print(f"[presence] elapsed={now-t0:5.1f}s remaining={remaining:4.1f}s "
+              f"detected={int(detected)} state={state}", flush=True)
+        if 4.0 < remaining <= 5.0:
+            print("\n>>> STEP OUT OF FRAME NOW — verifying 'absent' <<<\n", flush=True)
+        if preview:
+            lines = [f"HALF 2 PRESENCE  state={state}  detected={int(detected)}",
+                     f"remaining={remaining:4.1f}s",
+                     ("STEP OUT NOW" if remaining <= 5.0 else "stand still")]
+            if not _show("vision spike", _draw_overlay(frame, lines,
+                         box if detected else None)):
+                preview = False     # no display -> fall back to terminal-only
+```
+(Keep the existing summary line.)
+
+- [ ] **Step 6: Weave guidance into `cmd_identity`**
+
+Add a `preview: bool = False` parameter. Replace the inner `collect(label, seconds)` so each phase is gated and shows live face feedback:
+```python
+    def collect(label, seconds, who, preview_flag):
+        _gate(f"[Half 3] {who}")
+        _countdown(label)
+        embs, t0, last_print = [], time.monotonic(), -1.0
+        while time.monotonic() - t0 < seconds:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            e = _embed(ydet, rec, frame)
+            if e is not None:
+                embs.append(e)
+            now = time.monotonic()
+            if now - last_print >= 1.0:
+                last_print = now
+                print(f"[{label}] elapsed={now-t0:4.1f}/{seconds:.0f}s "
+                      f"face_this_frame={'YES' if e is not None else 'no '} "
+                      f"collected={len(embs)}", flush=True)
+            if preview_flag:
+                lines = [f"HALF 3 {label}", f"collected={len(embs)}",
+                         "face: YES" if e is not None else "face: no"]
+                if not _show("vision spike", _draw_overlay(frame, lines)):
+                    preview_flag = False
+            time.sleep(0.2)
+        print(f"    collected {len(embs)} embeddings")
+        return embs
+```
+Update the three call sites with explicit person instructions:
+```python
+    enroll = collect("ENROLL", enroll_seconds,
+                     "PERSON A (the enrolled user): stand at the kiosk to ENROLL.", preview)
+    # ... abort-if-empty unchanged ...
+    self_e = collect("SELF", test_seconds,
+                     "PERSON A again: stay at the kiosk to TEST SELF.", preview)
+    cross_e = collect("STRANGER", test_seconds,
+                      "PERSON B (a DIFFERENT person): stand at the kiosk to TEST STRANGER.", preview)
+```
+At the end of `cmd_identity`, if a preview window was opened, close it:
+```python
+    try:
+        import cv2
+        cv2.destroyAllWindows()
+    except Exception:
+        pass
+```
+
+- [ ] **Step 7: Wire `--preview` into `main()` for both subparsers and pass it through**
+
+```python
+    pr.add_argument("--preview", action="store_true")
+    idp.add_argument("--preview", action="store_true")
+    # dispatch:
+    elif args.cmd == "presence":
+        cmd_presence(args.index, args.width, args.height, args.seconds, args.fps,
+                     preview=args.preview)
+    elif args.cmd == "identity":
+        cmd_identity(args.index, args.width, args.height,
+                     args.enroll_seconds, args.test_seconds, preview=args.preview)
+```
+
+- [ ] **Step 8: Run the full suite + confirm cv2-free import**
+
+Run: `PYTHONPATH=. pytest tests/bench/test_vision_presence_probe.py -v`
+Expected: 8 passed (7 prior + the new gate test). Import remains cv2-free at load (cv2 only inside `_draw_overlay`/`_show`/`cmd_*`).
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add bench/vision_presence_probe.py tests/bench/test_vision_presence_probe.py
+git commit -m "spike(vision): guided operator prompts + optional --preview for live runs
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
