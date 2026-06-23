@@ -118,7 +118,8 @@ class PresenceDebouncer:
         return self._state
 
 
-def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float) -> None:
+def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float,
+                 preview: bool = False) -> None:
     """Half 2: YuNet detect at `fps`, apply zone/size filter + debounce, and report
     detect latency, achieved fps, CPU%, and present/absent reliability."""
     import cv2
@@ -129,11 +130,15 @@ def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float
     cap = cv2.VideoCapture(index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    _gate("[Half 2] PRESENCE — stand in front of the kiosk at arm's length.\n"
+          "You will be told to STEP OUT near the end so we can confirm 'absent'.")
+    _countdown("presence")
     deb = PresenceDebouncer()
     proc = psutil.Process()
     proc.cpu_percent(None)            # prime
     period = 1.0 / fps
     lat, present_frames, total = [], 0, 0
+    last_print = -1.0
     t0, next_t = time.monotonic(), time.monotonic()
     while time.monotonic() - t0 < seconds:
         ok, frame = cap.read()
@@ -149,16 +154,32 @@ def cmd_presence(index: int, width: int, height: int, seconds: float, fps: float
         _, faces = det.detect(frame)
         lat.append((time.monotonic() - ts) * 1000)
         detected = False
+        box = None
         if faces is not None:
             for f in faces:
-                box = (float(f[0]), float(f[1]), float(f[2]), float(f[3]))
-                if box_in_zone(box, w, h):
+                candidate = (float(f[0]), float(f[1]), float(f[2]), float(f[3]))
+                if box_in_zone(candidate, w, h):
                     detected = True
+                    box = candidate
                     break
         state = deb.update(detected, now)
         total += 1
         present_frames += 1 if state == "present" else 0
-        print(f"[presence] t={now-t0:5.1f}s detected={int(detected)} state={state}")
+        if now - last_print >= 1.0:
+            last_print = now
+            remaining = seconds - (now - t0)
+            print(f"[presence] elapsed={now-t0:5.1f}s remaining={remaining:4.1f}s "
+                  f"detected={int(detected)} state={state}", flush=True)
+            if 4.0 < remaining <= 5.0:
+                print("\n>>> STEP OUT OF FRAME NOW — verifying 'absent' <<<\n", flush=True)
+        if preview:
+            remaining = seconds - (now - t0)
+            lines = [f"HALF 2 PRESENCE  state={state}  detected={int(detected)}",
+                     f"remaining={remaining:4.1f}s",
+                     ("STEP OUT NOW" if remaining <= 5.0 else "stand still")]
+            if not _show("vision spike", _draw_overlay(frame, lines,
+                         box if detected else None)):
+                preview = False     # no display -> fall back to terminal-only
     cap.release()
     cpu = proc.cpu_percent(None)
     arr = np.array(lat) if lat else np.array([0.0])
@@ -214,7 +235,8 @@ def _embed(det, rec, frame):
     return rec.feature(aligned).ravel().copy()
 
 
-def cmd_identity(index, width, height, enroll_seconds, test_seconds) -> None:
+def cmd_identity(index, width, height, enroll_seconds, test_seconds,
+                 preview: bool = False) -> None:
     """Half 3: enroll person A, then measure self-similarity (A) and cross-similarity
     (a DIFFERENT person B) against A's mean embedding. Prints the separation report."""
     import cv2
@@ -225,9 +247,10 @@ def cmd_identity(index, width, height, enroll_seconds, test_seconds) -> None:
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-    def collect(label, seconds):
-        embs, t0 = [], time.monotonic()
-        print(f"\n>>> {label}: stand at the kiosk for {seconds:.0f}s ...")
+    def collect(label, seconds, who, preview_flag):
+        _gate(f"[Half 3] {who}")
+        _countdown(label)
+        embs, t0, last_print = [], time.monotonic(), -1.0
         while time.monotonic() - t0 < seconds:
             ok, frame = cap.read()
             if not ok:
@@ -235,19 +258,38 @@ def cmd_identity(index, width, height, enroll_seconds, test_seconds) -> None:
             e = _embed(ydet, rec, frame)
             if e is not None:
                 embs.append(e)
-            time.sleep(0.2)        # ~5 fps is plenty
+            now = time.monotonic()
+            if now - last_print >= 1.0:
+                last_print = now
+                print(f"[{label}] elapsed={now-t0:4.1f}/{seconds:.0f}s "
+                      f"face_this_frame={'YES' if e is not None else 'no '} "
+                      f"collected={len(embs)}", flush=True)
+            if preview_flag:
+                lines = [f"HALF 3 {label}", f"collected={len(embs)}",
+                         "face: YES" if e is not None else "face: no"]
+                if not _show("vision spike", _draw_overlay(frame, lines)):
+                    preview_flag = False
+            time.sleep(0.2)
         print(f"    collected {len(embs)} embeddings")
         return embs
 
-    enroll = collect("ENROLL person A", enroll_seconds)
+    enroll = collect("ENROLL", enroll_seconds,
+                     "PERSON A (the enrolled user): stand at the kiosk to ENROLL.", preview)
     if not enroll:
         print("[identity] no face during enroll — abort", file=sys.stderr)
         cap.release()
         return
     ref = np.mean(np.stack(enroll), axis=0)
-    self_e = collect("TEST person A again (self)", test_seconds)
-    cross_e = collect("TEST person B (stranger)", test_seconds)
+    self_e = collect("SELF", test_seconds,
+                     "PERSON A again: stay at the kiosk to TEST SELF.", preview)
+    cross_e = collect("STRANGER", test_seconds,
+                      "PERSON B (a DIFFERENT person): stand at the kiosk to TEST STRANGER.", preview)
     cap.release()
+    try:
+        import cv2 as _cv2
+        _cv2.destroyAllWindows()
+    except Exception:
+        pass
 
     self_scores = [cosine(e, ref) for e in self_e]
     cross_scores = [cosine(e, ref) for e in cross_e]
@@ -260,6 +302,54 @@ def cmd_identity(index, width, height, enroll_seconds, test_seconds) -> None:
     print(f"[identity] HALF-3 {'GO' if rep['separated'] else 'NO-GO'} "
           f"(threshold={rep['threshold']:.3f}, "
           f"self_accept={rep['self_accept_rate']:.2f}, cross_reject={rep['cross_reject_rate']:.2f})")
+
+
+def _supports_input() -> bool:
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def _gate(message: str) -> None:
+    """Pause until the operator presses Enter so the right person is in frame
+    before a phase. Prints + continues (no block) when stdin isn't interactive."""
+    print("\n" + "=" * 64 + f"\n{message}\n" + "=" * 64, flush=True)
+    if _supports_input():
+        try:
+            input(">>> Press Enter to start... ")
+        except EOFError:
+            pass
+
+
+def _countdown(label: str, secs: int = 3) -> None:
+    for k in range(secs, 0, -1):
+        print(f"[{label}] starting in {k}...", flush=True)
+        time.sleep(1.0)
+
+
+def _draw_overlay(frame, lines, box=None):
+    import cv2
+    if box is not None:
+        x, y, w, h = (int(v) for v in box)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    yy = 24
+    for ln in lines:
+        cv2.putText(frame, ln, (10, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (0, 255, 255), 2, cv2.LINE_AA)
+        yy += 26
+    return frame
+
+
+def _show(window: str, frame) -> bool:
+    """Show a preview frame; return False if no display (caller disables preview)."""
+    import cv2
+    try:
+        cv2.imshow(window, frame)
+        cv2.waitKey(1)
+        return True
+    except Exception:
+        return False
 
 
 def main() -> None:
@@ -276,11 +366,13 @@ def main() -> None:
                                ("--height", int, 240), ("--seconds", float, 30.0),
                                ("--fps", float, 3.0)]:
         pr.add_argument(name, type=typ, default=default)
+    pr.add_argument("--preview", action="store_true")
     idp = sub.add_parser("identity")
     for name, typ, default in [("--index", int, 0), ("--width", int, 320),
                                ("--height", int, 240), ("--enroll-seconds", float, 8.0),
                                ("--test-seconds", float, 8.0)]:
         idp.add_argument(name, type=typ, default=default)
+    idp.add_argument("--preview", action="store_true")
     args = p.parse_args()
     if args.cmd == "deps":
         for k, v in probe_deps().items():
@@ -288,10 +380,11 @@ def main() -> None:
     elif args.cmd == "capture":
         cmd_capture(args.index, args.width, args.height, args.seconds)
     elif args.cmd == "presence":
-        cmd_presence(args.index, args.width, args.height, args.seconds, args.fps)
+        cmd_presence(args.index, args.width, args.height, args.seconds, args.fps,
+                     preview=args.preview)
     elif args.cmd == "identity":
         cmd_identity(args.index, args.width, args.height,
-                     args.enroll_seconds, args.test_seconds)
+                     args.enroll_seconds, args.test_seconds, preview=args.preview)
 
 
 if __name__ == "__main__":

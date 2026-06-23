@@ -63,3 +63,11 @@ def test_separation_report_overlap_not_separated():
     rep = vpp.separation_report([0.4, 0.55, 0.3], [0.35, 0.5, 0.45])
     assert rep["separated"] is False
     assert min(rep["self_accept_rate"], rep["cross_reject_rate"]) < 1.0
+
+
+def test_gate_is_noop_when_non_interactive(monkeypatch, capsys):
+    # Force non-interactive stdin; _gate must print the message and NOT block.
+    monkeypatch.setattr(vpp.sys.stdin, "isatty", lambda: False, raising=False)
+    vpp._gate("PERSON A: stand at the kiosk")     # must return immediately
+    out = capsys.readouterr().out
+    assert "PERSON A: stand at the kiosk" in out
