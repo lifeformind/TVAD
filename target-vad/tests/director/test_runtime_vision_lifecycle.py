@@ -64,6 +64,10 @@ def test_runtime_starts_and_stops_vision():
     async def _drive():
         await rt.run_async()
 
-    asyncio.new_event_loop().run_until_complete(_drive())
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_drive())
+    finally:
+        loop.close()
     assert vision.started is not None      # started with the running loop
     assert vision.stopped is True          # stopped in teardown

@@ -58,6 +58,8 @@ class DirectorRuntime:
             # Interrupt-safe backstop (controller.py:254): if KeyboardInterrupt
             # unwound the loop, make sure no playback thread is still writing the
             # about-to-be-torn-down audio device.
+            if self._vision is not None:
+                self._vision.stop()
             self._playback.close()
             loop.close()
 
