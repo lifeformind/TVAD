@@ -7,6 +7,7 @@ from modes.director.state import State
 from modes.director.context import Context
 from modes.director import events as E
 from modes.director import commands as C
+from modes.director.events import PresenceStatus
 from modes.talkback.intent import Interjection, classify_interjection
 
 
@@ -58,6 +59,10 @@ def reduce(state: State, ctx: Context, event) -> tuple:
         return _on_interjection_segment(ctx, event)
     if isinstance(event, E.InterjectionTranscribed) and state is State.EVALUATING:
         return _on_interjection_transcribed(ctx, event)
+    if isinstance(event, E.OwnerPresenceEvent):
+        ctx.presence_status = event.status      # pure state-recording: NO transition
+        ctx.presence_since = event.now          # the owner-absent decision is on Tick
+        return state, []
     return state, []
 
 
@@ -72,6 +77,13 @@ def _on_tick(state: State, ctx: Context, ev: E.Tick) -> tuple:
     if sil >= (ctx.cfg.silence_timeout_s - ctx.cfg.nudge_lead_s) and not ctx.nudged_cycle:
         ctx.nudged_cycle = True
         return state, [C.SpeakNudge()]      # non-terminal: stay in LISTENING
+    # Camera floor control (Director-07): owner physically gone -> free the kiosk
+    # fast. Add-on only — runs AFTER the unchanged hard/silence/nudge checks, and
+    # the watchdog is still the sole timeout authority (a condition, not a timer).
+    if (ctx.presence_status is PresenceStatus.ABSENT
+            and ctx.now - ctx.presence_since >= ctx.cfg.owner_absent_grace_s
+            and ctx.now - ctx.last_speech_at >= ctx.cfg.active_talk_guard_s):
+        return State.IDLE, [C.EndSession("owner_absent")]
     return state, []
 
 
