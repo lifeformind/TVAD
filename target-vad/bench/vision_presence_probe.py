@@ -266,21 +266,30 @@ def cmd_identity(index, width, height, enroll_seconds, test_seconds,
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-    def collect(label, seconds, who, preview_flag):
+    def collect(label, seconds, who, preview_flag, settle_s=1.0):
         _gate(f"[Half 3] {who}")
         _countdown(label)
+        # The camera keeps buffering frames while we sit at the Enter prompt + the
+        # countdown, so the first reads return SECONDS-OLD frames — still showing the
+        # previous person at a person-swap. Drain the stale buffer before timing
+        # anything, then also discard the first `settle_s` of live frames as a
+        # belt-and-braces guard against the transition.
+        for _ in range(10):
+            cap.grab()
         embs, t0, last_print = [], time.monotonic(), -1.0
         while time.monotonic() - t0 < seconds:
             ok, frame = cap.read()
             if not ok:
                 break
-            e = _embed(ydet, rec, frame)
-            if e is not None:
-                embs.append(e)
             now = time.monotonic()
+            settling = (now - t0) < settle_s
+            e = _embed(ydet, rec, frame)
+            if e is not None and not settling:
+                embs.append(e)
             if now - last_print >= 1.0:
                 last_print = now
-                print(f"[{label}] elapsed={now-t0:4.1f}/{seconds:.0f}s "
+                tag = " SETTLING" if settling else ""
+                print(f"[{label}] elapsed={now-t0:4.1f}/{seconds:.0f}s{tag} "
                       f"face_this_frame={'YES' if e is not None else 'no '} "
                       f"collected={len(embs)}", flush=True)
             if preview_flag:
@@ -302,7 +311,9 @@ def cmd_identity(index, width, height, enroll_seconds, test_seconds,
     self_e = collect("SELF", test_seconds,
                      "PERSON A again: stay at the kiosk to TEST SELF.", preview)
     cross_e = collect("STRANGER", test_seconds,
-                      "PERSON B (a DIFFERENT person): stand at the kiosk to TEST STRANGER.", preview)
+                      "PERSON B only. PERSON A: step COMPLETELY out of frame (out of the "
+                      "camera's view) BEFORE pressing Enter, and stay out the whole phase.\n"
+                      "Then PERSON B (a DIFFERENT person): stand at the kiosk to TEST STRANGER.", preview)
     cap.release()
     try:
         import cv2 as _cv2
@@ -313,6 +324,19 @@ def cmd_identity(index, width, height, enroll_seconds, test_seconds,
     self_scores = [cosine(e, ref) for e in self_e]
     cross_scores = [cosine(e, ref) for e in cross_e]
     rep = separation_report(self_scores, cross_scores)
+    # Per-frame scores (in capture order) so contamination — a frame that grabbed the
+    # WRONG person's face — shows up as an isolated outlier instead of silently
+    # dragging the reject rate down. A genuine confusable B would score high
+    # CONSISTENTLY; a few stray highs clustered at a phase boundary = the owner was
+    # still in frame as people swapped (the largest-face harness embedded them).
+    thr = rep["threshold"]
+    print("\n[identity] self  scores (capture order):")
+    print("    " + " ".join(f"{s:.2f}" for s in self_scores))
+    print("[identity] cross scores (capture order, '*' = ABOVE threshold = looks like owner):")
+    print("    " + " ".join((f"{s:.2f}*" if s >= thr else f"{s:.2f}") for s in cross_scores))
+    n_contam = sum(1 for s in cross_scores if s >= thr)
+    print(f"[identity] cross frames above threshold: {n_contam}/{len(cross_scores)} "
+          f"(suspected owner-in-frame contamination if isolated)")
     print(f"\n[identity] self  n={len(self_scores)} "
           f"min={min(self_scores, default=0):.3f} mean={np.mean(self_scores or [0]):.3f}")
     print(f"[identity] cross n={len(cross_scores)} "
