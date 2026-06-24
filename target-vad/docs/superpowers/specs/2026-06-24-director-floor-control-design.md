@@ -65,17 +65,25 @@ camera reads into `IngestionWorker` (couples camera cadence to the 30 ms audio r
 loop — wrong coupling); a separate process + IPC (isolation we don't need on one box;
 noted only as a future escape hatch).
 
+> **As-built note (Director-07):** enrollment is done by the `VisionWorker` itself at
+> session start (it owns the camera), NOT captured at wake into the handoff. The
+> WakeGate stays camera-free. See "Wake-time face enrollment" in §7 below and the plan
+> for the rationale; the flow below reflects the as-built self-enroll.
+
 ```
-WAKE (session start)
-  ├─ existing: capture first audio segment + ECAPA voiceprint (holdout, etc.)
-  └─ NEW: grab a few camera frames → mean SFace embedding = owner face reference
-        → DirectorHandoff.primary_face_embedding   (None if no camera/face)
+SESSION START
+  └─ existing: capture first audio segment + ECAPA voiceprint (holdout, etc.)
 
 ASSEMBLY
-  └─ _build_vision(primary_face_embedding, vision_cfg)
-        ├─ cv2/camera unavailable OR vision.enabled=false OR reference None → None
+  └─ _build_vision(tb_cfg, bus)
+        ├─ cv2/camera unavailable OR vision.enabled=false → None
         │     → runtime identical to today (NO-REGRESSION GUARANTEE)
         └─ else → VisionWorker; runtime starts its capture thread on run, joins on teardown
+
+VISIONWORKER START (its own thread)
+  └─ self-enroll: grab enroll_frames → mean SFace embedding = owner face reference
+        (the owner is standing there, having just woken the kiosk)
+        → reference None (no face/camera) → report UNAVAILABLE, never ABSENT
 
 RUNTIME (vision thread, ~3 fps)
   frame → PresenceClassifier(frame, reference)
@@ -160,18 +168,29 @@ Properties:
 - The watchdog remains the **sole timeout authority** (architecture doc §4a, §5): this
   adds a *condition inside* `_on_tick`, not a competing timer.
 
-## 7. Wake-time face enrollment
+## 7. Face enrollment (as-built: VisionWorker self-enroll)
 
-The classifier needs an owner reference before the session runs. At session start
-(parallel to the existing audio voiceprint capture in the WakeGate → handoff seam), a
-small helper grabs `enroll_frames` camera frames, embeds the largest central face per
-frame (SFace), and stores the **mean** as `DirectorHandoff.primary_face_embedding`.
+The classifier needs an owner reference. **As built (Director-07), the `VisionWorker`
+self-enrolls at session start** rather than capturing the face at wake into the handoff:
+the worker owns the camera, so on its thread it first grabs `enroll_frames`, embeds the
+largest central face per frame (SFace), and uses their L2-normalized **mean** as the
+owner reference, then enters the monitor loop. The owner is standing at the kiosk
+(having just woken it), so they are in frame. This keeps the **WakeGate camera-free**
+(it has strict single-ownership constraints) and avoids threading a face embedding
+through `DirectorHandoff`.
 
-- If it captures nothing (no camera, no face, cv2 missing) → `primary_face_embedding =
-  None` → `_build_vision` returns `None` → **today's behavior, no session blocked on the
-  camera.** Starting a session must never hard-depend on the camera.
+- If it captures no face (no camera, no face, cv2 missing) → the worker reports
+  **`UNAVAILABLE`, never `ABSENT`** (`enroll_reference` returns `None`), so the camera
+  can never falsely free the kiosk; the session falls back to the audio silence timeout.
+  And `_build_vision` returns `None` entirely when vision is disabled or cv2 is missing →
+  **today's behavior, no session blocked on the camera.** Starting a session never
+  hard-depends on the camera.
 - Reuses the spike's embed path (`rec.alignCrop` + `rec.feature`) and the
   zone/largest-face selection.
+
+(Original design called for wake-time capture into `DirectorHandoff.primary_face_embedding`;
+the plan deliberately adopted worker self-enroll — smaller blast radius, camera-free
+WakeGate. Same instant, identical behavior.)
 
 ## 8. Config
 
@@ -191,7 +210,7 @@ kiosk.talkback.vision:
   absent_after_s: 2.0       # debounce: continuous non-detection before ABSENT
   owner_absent_grace_s: 3.0 # how fast to free the kiosk after the owner leaves
   active_talk_guard_s: 3.0  # never owner-absent-end within this of owner speech
-  enroll_frames: 8          # face-reference frames captured at wake
+  enroll_frames: 8          # face-reference frames the VisionWorker self-enrolls at session start
   audio_safety_net:
     enabled: false          # §9 deferred seam (SafetyNet + Lockout), default OFF
 ```
@@ -211,13 +230,23 @@ actively-talking owner from a transient miss.
 
 **Deferred audio seam (decision 3 + 5).** `SafetyNet.accumulate(audio, is_target)` +
 `maybe_verify()` is exactly an accumulated-window ECAPA speaker check, and `Lockout` is
-its action arm. Wired flag-gated behind `vision.audio_safety_net.enabled` (default
-**off**): when on, `IngestionWorker` feeds endpointed segment audio to `SafetyNet`; a
-reject verdict drives a `Lockout` action (e.g. `EndSession` / a duck-and-warn command).
-When off, the path is inert. This addresses "a bystander speaking right beside the
-present owner," which the camera (face present, not voice) cannot catch — but only
-*after* live data shows it's a real problem in the space. `verify_before_serve` and the
-enrollment holdout are a separate concern and are not touched here.
+its action arm — the intended home for "a bystander speaking right beside the present
+owner," which the camera (face present, not voice) cannot catch. **As built
+(Director-07), only the config flag `vision.audio_safety_net.enabled` (default off) is
+reserved — there is NO consumer yet; the wiring (`IngestionWorker` feeding `SafetyNet`,
+a reject verdict driving a `Lockout` action) is deferred** to a later increment, taken
+up only after live data shows the leak is a real problem in the space. Inert either way.
+`verify_before_serve` and the enrollment holdout are a separate concern and are not
+touched here.
+
+**Known limitation (recovery into a still-absent scene).** After a camera
+`UNAVAILABLE`→recovery where the owner is genuinely gone, the monitor re-accrues to
+`ABSENT` but emits nothing (no edge), so the reducer keeps the last-recorded
+`UNAVAILABLE` and frees the kiosk via the unchanged 30 s silence timeout instead of the
+fast owner-absent path. This is fail-safe (the session still ends) and only *delays*
+freeing in the narrow window where a glitch and a departure coincide; it never wrongly
+keeps a session alive past the audio authority. Revisit only if live data shows it
+matters.
 
 ## 10. Testing
 
