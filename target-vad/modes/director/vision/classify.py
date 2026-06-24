@@ -58,3 +58,8 @@ class PresenceDebouncer:
         elif self._state == "present" and not detected and run >= self._aa:
             self._state = "absent"
         return self._state
+
+    def reset(self) -> None:
+        """Restart hysteresis from 'absent' (used on recovery from UNAVAILABLE)."""
+        self._state = "absent"
+        self._since = None

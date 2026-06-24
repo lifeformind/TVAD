@@ -55,3 +55,18 @@ def test_debouncer_hysteresis():
     assert deb.update(True, 1.1) == "present"    # >= present_after
     assert deb.update(False, 2.0) == "present"   # < absent_after
     assert deb.update(False, 4.0) == "absent"    # >= absent_after
+
+
+def test_debouncer_reset():
+    deb = PresenceDebouncer(present_after_s=1.0, absent_after_s=2.0)
+    # Drive to present
+    assert deb.update(True, 0.0) == "absent"
+    assert deb.update(True, 1.1) == "present"
+    # Reset to absent
+    deb.reset()
+    # After reset, absent detection returns "absent"
+    assert deb.update(False, 1.2) == "absent"
+    # A single present update right after reset does not immediately return "present"
+    assert deb.update(True, 1.2) == "absent"    # must re-accrue from reset point
+    # Re-accruing to present takes present_after_s from reset
+    assert deb.update(True, 2.2) == "present"
