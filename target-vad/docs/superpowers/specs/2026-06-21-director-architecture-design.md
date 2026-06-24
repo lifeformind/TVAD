@@ -1,7 +1,9 @@
 # Conversation Director — Design (talkback rebuild)
 
 **Status:** DRAFT for build — decisions encoded, not open for re-litigation
-**Date:** 2026-06-21
+**Date:** 2026-06-21 (§4, §7, §9, §12, §13, §14 revised 2026-06-24 — FOCUS moved from
+acoustic pVAD to camera presence+identity; see
+`2026-06-24-director-floor-control-design.md`)
 **Mode:** Ground-up rebuild of the talkback conversation core (single-threaded async "Conversation Director")
 **Target:** LOCAL/OFFLINE on one NVIDIA DGX Spark (GB10 Grace-Blackwell, ~128GB unified, ONE GPU, aarch64). Python 3.12.
 
@@ -123,6 +125,17 @@ Five explicit states. `EVALUATING` is a **new** state, not a rename of `BARGED_I
 - **EVALUATING** resolves to exactly one of: **CUT** (→ THINKING then SPEAKING, answer the interjection) or **RESTORE** (→ SPEAKING, un-duck and keep talking). Default-to-cut on *semantic* ambiguity, but **never** cut on the structural reject gates below (too-short, far, speaker-mismatch, empty/low-confidence) — those always RESTORE. Auto-resume (Section 8) backs any wrong cut.
 - Every transition **into LISTENING** is "yielding the floor": it resets `_last_speech_at` (**controller.py:140-143**) *and* clears the per-cycle `_nudged` flag (Section 5).
 
+**Camera presence input (added 2026-06-24, §7-revised).** A `VisionWorker` emits
+`OwnerPresenceEvent(status ∈ {PRESENT, ABSENT, UNAVAILABLE})` onto the bus on debounced
+changes. The reducer records it in Context (no transition) and adds **one new
+end-condition inside `_on_tick`**: a sustained valid `ABSENT` (≥ `owner_absent_grace_s`)
+with an active-talk guard → `EndSession("owner_absent")` (frees the kiosk fast when the
+owner leaves; a stranger reads as `ABSENT`, so this also covers owner-changed). This is
+purely additive: the five states are unchanged, the §5 silence timeout/nudge are
+unchanged, and the watchdog stays the sole timeout authority (§4a) — it is a *condition*
+inside the existing tick, not a competing timer. `UNAVAILABLE`/absent-camera degrades to
+today's audio-only behavior. Detail: `2026-06-24-director-floor-control-design.md`.
+
 **MIGRATION NOTE (corrects "rename BARGED_IN").** Promoting EVALUATING is a **split of the SPEAKING branch**, not a rename:
 
 - The onset-duck block (**controller.py:839-849**, currently inside `_listen_loop` while `state == SPEAKING`) emits a new `near_field_onset` event; the reducer consumes it to transition `SPEAKING → EVALUATING` and emit a `duck` command.
@@ -236,7 +249,25 @@ Built and reused unchanged: `intent.py` (`classify_interjection`, tested, pure) 
 
 ## 7. Speaker focus in a crowd
 
-The kiosk stands in a crowd; FOCUS (Req 1) is the hardest requirement. Identity is layered, with the expensive/unreliable ECAPA pushed entirely off the hot path.
+> **REVISED 2026-06-24 — FOCUS is now PHYSICAL, not acoustic.** The original §7
+> mechanism (the FireRedChat pVAD gating audio on a per-frame `is_target`) is
+> **retired**: its ECAPA `spkemb` conditioning proved inert on our embeddings — it
+> degenerates to a plain energy VAD and bystanders leak (memory
+> `pvad-conditioning-inert`; shipped disabled in `config.yaml`). A vision spike then
+> proved, live on the GB10, that cheap CPU-only **camera presence (YuNet) + enrolled
+> identity (SFace)** discriminate the owner from a stranger at kiosk distance (0.73
+> cosine margin; `docs/notes/2026-06-23-vision-presence.md`). **FOCUS (Req 1) is now
+> delivered by the camera as the floor-control authority — owner present → keep
+> serving; owner gone → free the kiosk; stranger → not the owner — while audio is
+> content only.** The detailed design is
+> `docs/superpowers/specs/2026-06-24-director-floor-control-design.md` (Sub-project 2).
+> The subsections below are kept for the parts that survive (enrollment hardening,
+> verify-before-serve) and annotated for the parts that change (frame-level mechanism,
+> safety-net/lockout role).
+
+The kiosk stands in a crowd; FOCUS (Req 1) is the hardest requirement. **Physical
+presence is the authority** (camera); audio identity is a relaxed, deferred backstop,
+with the expensive/unreliable ECAPA pushed entirely off the hot path.
 
 **Enrollment hardening — reconciled with live config.** Short enrollment makes ECAPA unreliable (EER ~8.9% @1s vs ~2.0% @10s; TI unreliable below 2s). The Director requires a hardened enrollment before serving. The existing config is `core.speaker.enrollment_utterances = 5`, `enrollment_min_self_similarity = 0.6`, `min_segment_duration_ms = 800` (**config.yaml:11-13**); `EmbeddingExtractor.MIN_DURATION_SAMPLES = 12800` = 800ms (**embedder.py:15**, zero-pads below that). We **adopt the existing keys and raise two thresholds**, explicitly overriding:
 
@@ -251,21 +282,53 @@ The kiosk stands in a crowd; FOCUS (Req 1) is the hardest requirement. Identity 
 
 (Alternative, if the enrollment flow cannot be changed: modify `finalize_enrollment` to retain the utterances file instead of `os.remove` at **enrollment_store.py:99**. V1 uses the holdout-before-finalize path to avoid touching shared enrollment infra.)
 
-**Frame-level target-speaker mechanism — V1 (ship now): FireRedChat pVAD** (arXiv 2509.06502, `FireRedTeam/FireRedChat-pvad`, Apache-2.0). Mel → causal conv → concat the enrolled **ECAPA** embedding → GRU → per-10ms "is target speaker speaking" probability. Pure PyTorch (causal conv + GRU, no torchaudio), CPU-runnable — fits the placement rule. It is conditioned on the same `speechbrain/spkrec-ecapa-voxceleb` embedding the repo already produces (`core/speaker/embedder.py`), so the enrolled vector is handed to the pVAD at session start (`VADStream.update_speaker(embedding)`); zero new enrollment infra. Measured false-barge-in 10.2% (vs 33.4% LiveKit, 78.1% with no speaker gate). The pVAD worker emits, per aggregated ~50ms:
+**Frame-level target-speaker mechanism — V1 (ship now): CAMERA floor control
+(REVISED).** ~~FireRedChat pVAD~~ is retired (inert conditioning, above). FOCUS is
+instead a **separate `VisionWorker`** running CPU-only YuNet detection + SFace identity
+at ~3 fps, emitting a single `OwnerPresenceEvent(status ∈ {PRESENT, ABSENT,
+UNAVAILABLE}, now)` onto the event bus on debounced status changes. "Present" means the
+**enrolled owner's face** is in the central zone (SFace cosine ≥ `identity_threshold`,
+~0.40, vs a face embedding captured at wake). The reducer records presence in Context
+and adds **one end-condition inside `_on_tick`**: a sustained valid `ABSENT` (≥
+`owner_absent_grace_s`), with an active-talk guard, → `EndSession("owner_absent")`. A
+stranger reads as `ABSENT` (owner-changed = swap). This is an **add-on**: the §5
+silence timeout/nudge are unchanged, and the watchdog remains the sole timeout
+authority (§4a preserved — a condition, not a competing timer). `UNAVAILABLE` (camera
+glitch) ⇒ vision ignored, fall back to the §5 audio timeout (fail-safe). With vision
+disabled / no camera / no face reference, the worker is `None` and the runtime is
+byte-for-byte today's Director (no-regression guarantee). Full design + config in
+`2026-06-24-director-floor-control-design.md`.
 
-```
-SpeakerFrame(ts, is_target: bool, confidence: float, rms: float)
-```
+**Audio identity is deferred behind a seam (REVISED).** Content acceptance for V1 is
+proximity-only: camera owner-present + near-field RMS. The case the camera *cannot*
+catch — a bystander speaking right beside the present owner (face present, voice not the
+owner's) — is handled by a flag-gated audio seam (default **off**) built from the
+existing `SafetyNet` + `Lockout` (see the revised safety-net paragraph below),
+revisited only after live data shows it is a real problem in the space.
 
-The Director **gates all audio to STT on `is_target`** and only enters EVALUATING when `is_target ∧ rms > near_field_floor ∧ state == SPEAKING`.
+**Frame-level acoustic mechanism — V2: now OPTIONAL (REVISED).** With the camera
+delivering FOCUS, the bespoke trained TS-VAD drops from "needed for real FOCUS" to an
+**optional** enhancement (it would only add same-distance acoustic discrimination the
+camera can't, i.e. the bystander-beside-owner case the §9 seam targets more cheaply).
+Retained here for reference: a noise-robust causal-Conformer TS-VAD (arXiv 2501.03184
+design, ~124k params, 310ms context, FiLM, ECAPA-conditioned) on 2000h+ clean speech
+with MUSAN/RIR augmentation at 0-30dB SNR and 2-4-speaker mixtures, optionally with
+in-session self-augmentation (arXiv 2601.12769). **NeMo Streaming Sortformer remains
+rejected** (anonymous diarization, no enrollment conditioning; torchaudio has no working
+aarch64 CUDA build on GB10).
 
-**Concrete pVAD instantiation (the whole feasibility risk — must be specified).** FireRedChat's only *packaged* form is a LiveKit plugin, but the model underneath is plain PyTorch. The V1 loading path is: (1) vendor the model definition + checkpoint from `FireRedTeam/FireRedChat-pvad` (causal-conv + GRU `nn.Module`, ECAPA-conditioning fusion), bypassing the LiveKit plugin entirely; (2) load the checkpoint with `torch.load(..., map_location="cpu")` and `model.eval()`; (3) drive it frame-by-frame from the Ingestion worker's mel front-end, maintaining the causal conv + GRU hidden state across chunks (streaming). **Gate before commit:** a combined hot-path latency spike on GB10 CPU (see "Combined budget" below) — no published CPU benchmark exists; architecture predicts <5ms/frame but this is unverified. If the bare-model load is blocked or the latency budget fails, FOCUS degrades to the RMS proximity gate (a much weaker crowd filter — see V1 degraded mode).
-
-**Frame-level mechanism — V2 (after kiosk audio is collected):** train a dedicated noise-robust causal-Conformer TS-VAD (arXiv 2501.03184 design, ~124k params, 310ms context, FiLM, ECAPA-conditioned) on 2000h+ clean speech with MUSAN/RIR augmentation at 0-30dB SNR and 2-4-speaker mixtures, optionally with in-session self-augmentation (arXiv 2601.12769) to adapt the embedding to room/mic drift. **NeMo Streaming Sortformer is explicitly rejected:** it does anonymous diarization (no enrollment conditioning) and depends on torchaudio, which has no working aarch64 CUDA build on GB10.
-
-**Rolling-window + RMS safety net (kept).** The existing rolling-window ECAPA gate (the `turn_gate` accumulation in `controller.py` + `DecisionSmoother`, config at **config.yaml:100-114**) is **demoted from primary to safety-net**: it accumulates only `is_target` audio, embeds every ~`verify_window_ms` (2000ms, **config.yaml:103**) off the hot path (`run_in_executor`, 108ms p95 fine here), and runs the M-of-N `DecisionSmoother` (window_size 3 / min_matches 1, **config.yaml:113-114**) to catch *session hijacking* (a different person taking over for >1 window). The near-field **RMS proximity gate** (`barge_in.proximity`, **config.yaml:134-137**, auto-calibrated from primary enrollment RMS when `rms_threshold: null`) is the crash-fallback: if the pVAD worker dies, `is_target` falls back to `rms ≥ proximity_rms`.
-
-**De-risked lockout** (replacing the old permanent M-of-N eject that locked out the real user): a first M-of-N miss → **WARN** (duck + caution), not eject. **EJECT** only on two consecutive failed windows **and** a failed RMS proximity check. After lockout, if no near-field RMS activity for 5s, go to **IDLE** (accept a fresh wake) rather than hard-ending — the user is never permanently locked out by short-segment ECAPA noise.
+**Rolling-window safety net → the deferred audio seam (REVISED).** Session-hijack
+detection is now the camera's job (a stranger reads as `ABSENT` → the session frees on
+the §4 owner-absent path). The accumulated-window ECAPA verifier (`SafetyNet`) +
+`Lockout` are therefore **repurposed, not primary**: they become the **flag-gated
+audio seam** (`vision.audio_safety_net.enabled`, default **off**) for the one case the
+camera cannot see — a bystander speaking right beside the present owner. When enabled,
+`SafetyNet.accumulate(is_target audio)` embeds every ~`verify_window_ms` (2000ms) off
+the hot path (`run_in_executor`, 108ms p95 fine here) and `Lockout` (WARN → EJECT →
+IDLE, never a permanent lockout) is its action arm. Default-off until live data shows
+the leak is real. The near-field **RMS proximity gate** (`barge_in.proximity`,
+auto-calibrated from primary enrollment RMS when `rms_threshold: null`) stays as the
+content near-field check and as the crash-fallback for `is_target`.
 
 ---
 
@@ -306,7 +369,7 @@ Req 2: interrupt mid-reply, answer the clarifier, then continue the prior point.
 | Component | Device | Hot path? | Notes |
 |---|---|---|---|
 | Silero VAD | CPU | yes (onset) | `is_speaking` drives duck-at-onset |
-| pVAD (FireRedChat) | CPU | yes (gate) | ECAPA-conditioned, ~10ms frames; un-benchmarked on GB10 CPU |
+| ~~pVAD (FireRedChat)~~ → VisionWorker | CPU | floor-control (off audio hot path) | RETIRED 2026-06-24; replaced by YuNet+SFace camera presence at ~3 fps in a separate thread (§7-revised) — not on the audio reflex loop at all |
 | Smart Turn v3 | CPU | yes (endpoint) | 27-55ms p95, `run_in_executor` |
 | AEC (WebRTC APM) | CPU | yes (per-frame) | runs in Ingestion worker; reference invariant in Section 10 |
 | `classify_interjection` | CPU (in-loop) | yes | pure, ~µs, synchronous |
@@ -375,7 +438,7 @@ Deterministic dialogue policy was a core constraint; the FSM is built to be test
 - **Reflex/arbiter contract tests.** `classify_interjection` truth table (backchannel set, force-interrupt set, empty→backchannel, default→interrupt); Smart Turn threshold behavior; the EVALUATING gate ladder (too-short reject at `verify_window_ms`, far-RMS reject, speaker-mismatch reject, empty/`mean_word_prob<conf_floor`→RESTORE).
 - **THINKING-state transitions.** Assert `LISTENING → THINKING` on `llm_request_sent` and `THINKING → SPEAKING` on `first_tts_frame_written`; assert `_silence_duration()==0` in THINKING/SPEAKING/EVALUATING and `>0` only in LISTENING.
 - **Nudge mechanics (Req-4 regression).** Drive the watchdog with a synthetic clock: assert the nudge fires exactly once when `silence ≥ silence_timeout_s − nudge_lead_s`, does **not** stop the loop, does **not** re-fire on the next tick, and **re-arms** after a `LISTENING` re-entry clears `_nudged_cycle`; then assert the terminal `silence_timeout` still fires.
-- **Scenario E2E** (recorded audio fixtures): backchannel ignored (keep talking), genuine question cuts and is answered, interrupt-then-resume continues the prior point ("As I was saying…"), **timeout suspended while speaking then nudge then end** (the explicit Req-4 regression), bystander/non-target speaker refused (pVAD `is_target=False`), short interjection below `verify_window_ms` dropped, session-hijack ejection.
+- **Scenario E2E** (recorded audio fixtures): backchannel ignored (keep talking), genuine question cuts and is answered, interrupt-then-resume continues the prior point ("As I was saying…"), **timeout suspended while speaking then nudge then end** (the explicit Req-4 regression), bystander/non-target speaker refused (camera owner-absent → `EndSession("owner_absent")`; §7-revised), short interjection below `verify_window_ms` dropped, session-hijack ejection.
 - **Concurrency/teardown regression.** Cut-during-playback (assert no PortAudio segfault, `_drain_playback` awaited before close), **no-orphan-after-end** (assert nothing answers after `DirectorResult` returns — the exact Req-5 bug; plus the grep post-conditions of Section 4a), KeyboardInterrupt mid-playback hits the synchronous backstop, stale-`gen_id` events dropped, AEC reference stays sample-aligned across the Ingestion/Playback worker boundary.
 - **Enrollment / verify-before-serve.** Assert session refuses to start when `cosine(primary, holdout) < 0.80`; assert the holdout embedding is captured *before* `finalize_enrollment` deletes utterances (**enrollment_store.py:99**).
 
@@ -389,7 +452,16 @@ Build the Director as a **new module alongside** the existing controller, reuse 
 2. **Single watchdog + nudge.** Extend `AsyncWatchdog` (new `nudge_lead_s`/`on_nudge`/`is_nudged`/`mark_nudged`; non-terminal nudge path, Section 5). Add `_nudged_cycle`, cleared on every LISTENING entry. Keep `_silence_duration → 0` outside LISTENING (update its docstring). Add `kiosk.talkback.nudge_lead_s` (5).
 3. **Subsume the pipeline session lifecycle.** Reduce `KioskPipeline` to the thin **WakeGate** (IDLE + AWAIT_FIRST_SEGMENT + handoff). **Delete** `_watchdog_loop`/`_start_watchdog`/`_stop_watchdog` (**pipeline.py:91-114**), `_handle_active_chunk`/`_process_session_segment`, and the `Session` field. Remove `kiosk.session_silence_timeout_s`/`session_hard_timeout_s` (**config.yaml:30-31**). Land the Section-4a grep post-condition test.
 4. **Re-back STT off faster-whisper.** Swap `StreamingStt` internals to openai-whisper (torch CUDA, proven) or NeMo; **extend** `transcribe_segment → TranscriptResult(text, mean_word_prob)`; wire the empty/low-confidence RESTORE guard. (This is prerequisite to *both* LISTENING and EVALUATING working on GB10 — faster-whisper has no CUDA wheel here.)
-5. **Crowd focus.** Vendor + load the FireRedChat pVAD bare model on CPU (Section 7 instantiation steps), run the **combined hot-path latency spike** first; gate STT on `is_target`; demote rolling-window ECAPA + `DecisionSmoother` to safety-net; wire de-risked lockout; capture holdout-before-finalize and add verify-before-serve at session start (raise `enrollment_min_self_similarity` 0.6→0.80).
+5. **Crowd focus — CAMERA floor control (REVISED 2026-06-24; was pVAD).** The pVAD
+   path shipped and was disabled (inert conditioning). FOCUS is now a separate
+   `VisionWorker` (YuNet + SFace, CPU, ~3 fps) emitting `OwnerPresenceEvent`; the
+   reducer adds the owner-absent end-condition inside `_on_tick` (§4-revised). Build
+   per `2026-06-24-director-floor-control-design.md` (events+reducer pure first, then
+   classifier, worker, wake-time face enrollment, assembly `_build_vision` + runtime
+   start/stop, then the flag-gated `SafetyNet`/`Lockout` audio seam, default off).
+   Still in scope from the original step 5 and unchanged: capture holdout-before-finalize
+   and add verify-before-serve at session start (raise `enrollment_min_self_similarity`
+   0.6→0.80). This becomes its own plan (Director-07-vision-floor-control).
 6. **Interrupt-resume polish.** Bounded interrupted-stack, LLM-steered continuation (`_store_interruption`/`_maybe_inject_resume_steer` ported verbatim), auto-resume net, two-client LLM lifecycle, arbiter wiring.
 
 **Cutover criteria:** FSM reducer tests + nudge regression + all E2E scenarios green; cut-during-playback and no-orphan-after-end (incl. Section-4a greps) pass; **combined** reflex hot-path measured <100ms under live gemma load on GB10; pVAD latency spike confirms CPU budget *and* bare-model load works; verify-before-serve + nudge-then-end verified; STT re-backed and loading on CUDA. The old `TalkbackController`/pipeline paths are removed only after the Director clears every scenario.
@@ -399,10 +471,24 @@ Build the Director as a **new module alongside** the existing controller, reuse 
 ## 14. Risks & open questions
 
 - **Streaming-STT integration (highest).** `StreamingStt` ships faster-whisper, which has **no aarch64 CUDA wheel** — so *both* STT paths need re-backing, not "reuse as-is." NeMo on aarch64 is version-fragile (pin PyTorch 2.9/container 25.10, `lhotse>=1.32.2`; 2.10 breaks it; NIM is x86-only); the in-process streaming loop must be ported from NeMo example scripts; a `word_confidence` length-mismatch bug exists in some parakeet variants. The only CUDA STT *proven* on this box is openai-whisper (torch), and even that was a spike script, not an integrated worker with the extended `TranscriptResult` signature. **Mitigation:** ship LISTENING + EVALUATING on openai-whisper-chunked if NeMo stalls; treat the worker integration (signature, chunk loop, gen_id) as real work, not done.
-- **pVAD un-benchmarked on GB10 CPU.** No published CPU latency; FireRedChat's only packaged form is a LiveKit plugin (the model is plain PyTorch underneath — vendor it directly per Section 7). It sits on the hot path gating all audio to STT. **Gate:** bare-model-load + latency spike are cutover criteria; if dropped, FOCUS degrades to the RMS proximity gate — a measurably weaker crowd filter (no published quality number for the fallback alone — that gap is acknowledged, not closed).
-- **Combined hot-path latency unverified.** The spike measured reflex specialists *separately* under gemma load. The Director adds pVAD on the same CPU. The **combined** per-chunk budget (Silero + pVAD + Smart Turn + classify, on one chunk, under GPU-driver contention) is a required new spike (Section 9) and a hard cutover gate.
+- **~~pVAD un-benchmarked on GB10 CPU~~ — RESOLVED/RETIRED (2026-06-24).** The pVAD is
+  dead (inert conditioning) and FOCUS moved to the camera, so this risk and the
+  "combined hot-path latency" gate it implied are **off the critical path**: the camera
+  presence path is CPU-only at ~3 fps (detection ~2% of a core) and was spike-validated
+  to co-exist with the full LLM/TTS/STT stack (contention PASS,
+  `docs/notes/2026-06-23-vision-presence.md`). No pVAD CPU budget remains to clear.
+- **NEW: camera dependency (placement, lighting, two-faces).** FOCUS now depends on a
+  camera. The spike was at a desk; real kiosk mount height/backlighting/distance can
+  shift the identity margin (generous 0.73 headroom; `identity_threshold` is config,
+  re-measure on-site). Two people at the kiosk (owner + companion leaning in) could let
+  the larger central face win — mitigated by the zone/size gate + debounce, revisited
+  if observed. Camera failure fails safe (degrades to today's audio-only timeout).
 - **GPU contention at a cut.** STT(EVAL) + TTS + main + arbiter LLM may hit one GPU at the worst instant; the reused components have **no** GPU priority queue. V1 mitigation is structural (cancel main LLM + drain TTS on cut so EVAL-STT rarely overlaps live TTS); a real scheduler is deferred. This remains an unvalidated worst-case path.
-- **Trained TS-VAD data (V2).** A bespoke noise-robust TS-VAD needs 2000h+ augmented multi-speaker data and real kiosk-room audio. Deferred to V2; V1 ships on the borrowed pVAD.
+- **Trained TS-VAD data (V2) — now OPTIONAL (2026-06-24).** With the camera delivering
+  FOCUS, the bespoke noise-robust TS-VAD (2000h+ augmented data) is no longer needed for
+  FOCUS — it drops to an optional enhancement for same-distance acoustic discrimination
+  (the bystander-beside-owner case the §9 audio seam targets more cheaply). V1 ships on
+  the camera, not a borrowed/trained acoustic model.
 - **Two-client LLM lifecycle.** The current single-client close-then-ping (**controller.py:264**) must be duplicated per client and the arbiter must never be closed mid-turn. Mis-coordination would either stall the arbiter or cancel it during an ambiguity call.
 - **Single-maintainer burden.** A hand-rolled FSM + borrowed specialists is a lot of surface for one engineer. The pure-reducer design and Protocol-based mock injection are the deliberate countermeasures (most logic testable without hardware).
 - **Conditions that would change the approach:** if a maintained framework shipped the race-fixed PortAudio teardown *and* an interrupt-resume stack, the build-vs-buy verdict would flip toward buy; if torchaudio aarch64 CUDA gets fixed, Streaming Sortformer could be reconsidered for diarization-assisted focus (still needs enrollment conditioning); if ECAPA short-segment reliability were solved, the pVAD layer could simplify.
