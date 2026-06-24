@@ -38,6 +38,8 @@ from modes.director.workers.ingestion import IngestionWorker
 from modes.director.workers.playback import PlaybackWorker
 from modes.director.workers.stt_worker import SttWorker
 from modes.director import events as E
+from modes.director.vision.opencv_backend import OpenCvBackend, cv2_available as _cv2_available
+from modes.director.workers.vision import VisionWorker
 from modes.talkback.chunker import SentenceChunker
 from modes.talkback.conversation import ConversationManager
 from modes.talkback.endpointing import NullTurnDetector
@@ -84,6 +86,29 @@ def _build_pvad(primary_embedding, proximity_rms: float, tb_cfg: dict):
         print(f"[director] pVAD unavailable -> FOCUS via is_target=True fallback: "
               f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         return None
+
+
+def _build_vision(tb_cfg: dict, *, bus):
+    """Build the Director-07 camera floor-control VisionWorker, or None for the
+    no-vision path (today's Director). None when vision is disabled or cv2 is
+    unavailable — the no-regression guarantee. The worker self-enrolls the owner
+    at session start and reports UNAVAILABLE if it can't (never falsely ABSENT)."""
+    v = tb_cfg.get("vision", {})
+    if not v.get("enabled", False):
+        return None
+    if not _cv2_available():
+        print("[director] vision enabled but cv2/FaceDetectorYN unavailable -> "
+              "floor control via audio timeout only", file=sys.stderr, flush=True)
+        return None
+    backend = OpenCvBackend(
+        camera_index=v.get("camera_index", 0), width=v.get("width", 640),
+        height=v.get("height", 360), identity_threshold=v.get("identity_threshold", 0.40),
+        min_area_frac=v.get("min_area_frac", 0.015))
+    return VisionWorker(
+        backend, bus, fps=v.get("fps", 3.0),
+        present_after_s=v.get("present_after_s", 1.0),
+        absent_after_s=v.get("absent_after_s", 2.0),
+        enroll_frames=v.get("enroll_frames", 8))
 
 
 def _director_config_from(tb_cfg: dict) -> DirectorConfig:
@@ -252,6 +277,8 @@ def build_director_runtime(
         score_fn=cosine_similarity, pvad=pvad,
     )
 
+    vision = _build_vision(tb_cfg, bus=bus)
+
     watchdog = AsyncWatchdog(
         tick_s=_watchdog_tick_s, clock=clock, bus=bus,
         on_session_end=lambda reason: None,
@@ -260,7 +287,7 @@ def build_director_runtime(
     runtime = DirectorRuntime(
         director=director, bus=bus, watchdog=watchdog, ingestion=ingestion,
         stt_worker=stt_worker, generation=generation, playback=playback,
-        clock=clock,
+        clock=clock, vision=vision,
     )
     return DirectorRuntimeFactory(runtime, bus, stt_worker, handoff.first_segment)
 

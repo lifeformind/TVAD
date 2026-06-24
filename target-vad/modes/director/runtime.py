@@ -36,7 +36,7 @@ def _event_text(event) -> str:
 
 class DirectorRuntime:
     def __init__(self, director, bus, watchdog, ingestion, stt_worker,
-                 generation, playback, clock):
+                 generation, playback, clock, vision=None):
         self._director = director
         self._bus = bus
         self._watchdog = watchdog
@@ -44,6 +44,7 @@ class DirectorRuntime:
         self._stt = stt_worker
         self._generation = generation
         self._playback = playback
+        self._vision = vision
         self._clock = clock
         self._started_at = clock()
         self._result_reason = None
@@ -64,6 +65,8 @@ class DirectorRuntime:
         self._started_at = self._clock()
         ingestion_task = asyncio.create_task(self._ingestion.run())
         self._watchdog.start()
+        if self._vision is not None:
+            self._vision.start(asyncio.get_running_loop())
         try:
             while self._result_reason is None:
                 event = await self._bus.get()
@@ -101,6 +104,8 @@ class DirectorRuntime:
         """Graceful, no-orphan teardown (spec section 11): cancel ingestion +
         generation, drain playback BEFORE close (controller.py:436-441), stop the
         watchdog, close the stream."""
+        if self._vision is not None:
+            self._vision.stop()
         self._ingestion.stop()
         ingestion_task.cancel()
         try:
