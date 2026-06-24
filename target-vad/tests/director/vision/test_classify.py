@@ -39,8 +39,13 @@ def test_owner_offcenter_absent():
 
 
 def test_cosine_basic():
-    assert cosine([1, 0], [1, 0]) == 1.0
-    assert abs(cosine([1, 0], [0, 1])) < 1e-9
+    assert cosine(np.array([1, 0]), np.array([1, 0])) == 1.0
+    assert abs(cosine(np.array([1, 0]), np.array([0, 1]))) < 1e-9
+
+
+def test_cosine_zero_vector():
+    assert cosine(np.array([0.0, 0.0]), np.array([1.0, 0.0])) == 0.0
+    assert cosine(np.array([1.0, 0.0]), np.array([0.0, 0.0])) == 0.0
 
 
 def test_debouncer_hysteresis():
