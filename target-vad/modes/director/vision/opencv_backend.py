@@ -49,6 +49,7 @@ class OpenCvBackend:
         self._rec = None
 
     def open(self) -> bool:
+        self._det = self._rec = None
         try:
             import cv2
             self._det = cv2.FaceDetectorYN.create(
@@ -119,3 +120,5 @@ class OpenCvBackend:
             except Exception:
                 pass
             self._cap = None
+        self._det = None
+        self._rec = None

@@ -1,11 +1,20 @@
-import importlib
+import subprocess
+import sys
 
 
-def test_module_imports_without_cv2():
-    # Importing the backend must NOT import cv2 at module load (lazy inside methods).
-    mod = importlib.import_module("modes.director.vision.opencv_backend")
-    assert hasattr(mod, "OpenCvBackend")
-    assert hasattr(mod, "cv2_available")
+def test_importing_module_does_not_load_cv2():
+    # Watertight: in a FRESH interpreter, importing the backend must not pull cv2
+    # into sys.modules (all cv2 use is lazy, inside methods).
+    code = (
+        "import sys; import modes.director.vision.opencv_backend as m; "
+        "assert hasattr(m, 'OpenCvBackend') and hasattr(m, 'cv2_available'); "
+        "assert 'cv2' not in sys.modules, 'cv2 was imported at module load!'; "
+        "print('OK')"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                            text=True, cwd="/home/ldrgx10/FullDuplexVoice/TVAD/target-vad")
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
 
 
 def test_cv2_available_is_bool():
