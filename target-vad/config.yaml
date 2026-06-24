@@ -162,6 +162,28 @@ kiosk:
       enabled: false
       threshold: 0.5             # per-frame target-speaker prob >= this => target
 
+    # Camera floor control (Director-07). Presence is the floor authority: keep
+    # serving the owner, free the kiosk fast when they physically leave, treat a
+    # stranger as the owner leaving. ADD-ON: the silence_timeout above is unchanged.
+    # CPU-only YuNet+SFace (no insightface); see docs/notes/2026-06-23-vision-presence.md.
+    vision:
+      enabled: true
+      camera_index: 0
+      width: 640                # spike-validated mode; do NOT set CAP_PROP_FPS
+      height: 360
+      fps: 3                    # low-rate dedicated capture (detection ~2% of a core)
+      identity_threshold: 0.40  # spike Tier-2 GO: self >=0.79 vs stranger <=0.06
+      min_area_frac: 0.015      # zone/size gate at 640x360
+      present_after_s: 1.0      # debounce hysteresis -> PRESENT
+      absent_after_s: 2.0       # debounce hysteresis -> ABSENT
+      owner_absent_grace_s: 3.0 # sustained ABSENT this long => free the kiosk
+      active_talk_guard_s: 3.0  # never owner-absent-end within this of owner speech
+      enroll_frames: 8          # owner face-reference frames captured at session start
+      # Reserved: the deferred audio speaker-check seam (spec §9). NOT wired in this
+      # plan — revisit after live data (Q3/Q5 deferred). No consumer reads this yet.
+      audio_safety_net:
+        enabled: false
+
     # Interruption-resume: after answering an interruption, the AI offers to
     # continue the prior topic and, on confirmation, resumes from where it left
     # off. Controller owns the resume lifecycle; the LLM phrases the offer and

@@ -90,6 +90,7 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
     """Map the kiosk.talkback.* config onto the frozen DirectorConfig. Pulls the
     same keys the reducer's thresholds came from (spec section 5/6)."""
     barge = tb_cfg.get("barge_in", {})
+    vision = tb_cfg.get("vision", {})
     return DirectorConfig(
         silence_timeout_s=tb_cfg.get("silence_timeout_s", 30.0),
         hard_timeout_s=tb_cfg.get("hard_timeout_s", 300.0),
@@ -98,6 +99,8 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
         verify_window_ms=barge.get("verify_window_ms", 700.0),
         speaker_threshold=barge.get("speaker_threshold", 0.20),
         duck_level=barge.get("duck_level", 0.35),
+        owner_absent_grace_s=vision.get("owner_absent_grace_s", 3.0),
+        active_talk_guard_s=vision.get("active_talk_guard_s", 3.0),
     )
 
 
