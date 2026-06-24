@@ -1,6 +1,13 @@
 """Events — inputs the reducer consumes. Workers (Plan 02) emit these. Frozen."""
 
+import enum
 from dataclasses import dataclass
+
+
+class PresenceStatus(enum.Enum):
+    PRESENT = "PRESENT"          # the enrolled owner's face is in frame
+    ABSENT = "ABSENT"            # no owner: empty frame OR a stranger (identity fail)
+    UNAVAILABLE = "UNAVAILABLE"  # camera can't judge (glitch / not yet enrolled)
 
 
 @dataclass(frozen=True)
@@ -63,3 +70,12 @@ class AssistantPartial:
 class ReplyComplete:
     gen_id: int
     assistant_text: str
+
+
+@dataclass(frozen=True)
+class OwnerPresenceEvent:
+    """Camera floor-control signal (Director-07). Emitted by VisionWorker on a
+    DEBOUNCED status change only. Pure state-recording in the reducer — never a
+    transition; the owner-absent decision happens on a Tick."""
+    status: PresenceStatus
+    now: float

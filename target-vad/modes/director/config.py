@@ -17,3 +17,7 @@ class DirectorConfig:
     speaker_threshold: float = 0.20      # barge_in.speaker_threshold (config.yaml:130)
     conf_floor: float = 0.5             # NEW: mean_word_prob below this => RESTORE
     duck_level: float = 0.35            # barge_in.duck_level: partial duck keeps the reply tail audible when an interjection is rejected (was 0.15 = near-silent -> lost tails)
+    # Camera floor control (Director-07, spec §8). Presence is an ADD-ON: these
+    # never touch the silence timeout above; they only add an owner-absent end.
+    owner_absent_grace_s: float = 3.0   # sustained ABSENT this long => free the kiosk
+    active_talk_guard_s: float = 3.0    # never owner-absent-end within this of owner speech

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from modes.director.config import DirectorConfig
+from modes.director.events import PresenceStatus
 from modes.talkback.conversation import ConversationManager
 
 
@@ -23,6 +24,8 @@ class Context:
     partial_response: str = ""      # assistant text spoken so far this turn
     pending_steer: Optional[str] = None  # one-shot LLM steer (resume), Plan 06 fills it
     interrupted_stack: list = field(default_factory=list)  # bounded in Plan 06
+    presence_status: PresenceStatus = PresenceStatus.UNAVAILABLE  # camera floor control
+    presence_since: float = 0.0          # monotonic time of the last presence change
 
 
 def new_context(cfg: DirectorConfig, conversation: ConversationManager,
@@ -30,4 +33,5 @@ def new_context(cfg: DirectorConfig, conversation: ConversationManager,
     return Context(
         cfg=cfg, conversation=conversation, proximity_rms=proximity_rms,
         now=now, started_at=now, last_speech_at=now,
+        presence_since=now,
     )
