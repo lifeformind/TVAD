@@ -94,7 +94,15 @@ def _build_vision(tb_cfg: dict, *, bus):
     unavailable — the no-regression guarantee. The worker self-enrolls the owner
     at session start and reports UNAVAILABLE if it can't (never falsely ABSENT)."""
     v = tb_cfg.get("vision", {})
-    if not v.get("enabled", False):
+    enabled = v.get("enabled", False)
+    if enabled is not True:
+        # Only a real boolean True enables vision. A non-bool value fails SAFE to
+        # off rather than fail-open: the live `enabled: flase` typo parses as a
+        # truthy STRING and would otherwise silently keep vision on. Warn when a
+        # present value is malformed so the misconfig is visible, not silent.
+        if "enabled" in v and not isinstance(enabled, bool):
+            print(f"[director] vision.enabled is not a boolean (got {enabled!r}) -> "
+                  "treating as disabled", file=sys.stderr, flush=True)
         return None
     if not _cv2_available():
         print("[director] vision enabled but cv2/FaceDetectorYN unavailable -> "
