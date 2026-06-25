@@ -3,7 +3,9 @@
 **Status:** DRAFT for build — decisions encoded, not open for re-litigation
 **Date:** 2026-06-21 (§4, §7, §9, §12, §13, §14 revised 2026-06-24 — FOCUS moved from
 acoustic pVAD to camera presence+identity; see
-`2026-06-24-director-floor-control-design.md`)
+`2026-06-24-director-floor-control-design.md`. §13 step 5 camera floor control
+SHIPPED 2026-06-25 — Director-07 merged to master, see
+`docs/notes/2026-06-24-director-07-live.md`.)
 **Mode:** Ground-up rebuild of the talkback conversation core (single-threaded async "Conversation Director")
 **Target:** LOCAL/OFFLINE on one NVIDIA DGX Spark (GB10 Grace-Blackwell, ~128GB unified, ONE GPU, aarch64). Python 3.12.
 
@@ -452,16 +454,21 @@ Build the Director as a **new module alongside** the existing controller, reuse 
 2. **Single watchdog + nudge.** Extend `AsyncWatchdog` (new `nudge_lead_s`/`on_nudge`/`is_nudged`/`mark_nudged`; non-terminal nudge path, Section 5). Add `_nudged_cycle`, cleared on every LISTENING entry. Keep `_silence_duration → 0` outside LISTENING (update its docstring). Add `kiosk.talkback.nudge_lead_s` (5).
 3. **Subsume the pipeline session lifecycle.** Reduce `KioskPipeline` to the thin **WakeGate** (IDLE + AWAIT_FIRST_SEGMENT + handoff). **Delete** `_watchdog_loop`/`_start_watchdog`/`_stop_watchdog` (**pipeline.py:91-114**), `_handle_active_chunk`/`_process_session_segment`, and the `Session` field. Remove `kiosk.session_silence_timeout_s`/`session_hard_timeout_s` (**config.yaml:30-31**). Land the Section-4a grep post-condition test.
 4. **Re-back STT off faster-whisper.** Swap `StreamingStt` internals to openai-whisper (torch CUDA, proven) or NeMo; **extend** `transcribe_segment → TranscriptResult(text, mean_word_prob)`; wire the empty/low-confidence RESTORE guard. (This is prerequisite to *both* LISTENING and EVALUATING working on GB10 — faster-whisper has no CUDA wheel here.)
-5. **Crowd focus — CAMERA floor control (REVISED 2026-06-24; was pVAD).** The pVAD
-   path shipped and was disabled (inert conditioning). FOCUS is now a separate
-   `VisionWorker` (YuNet + SFace, CPU, ~3 fps) emitting `OwnerPresenceEvent`; the
-   reducer adds the owner-absent end-condition inside `_on_tick` (§4-revised). Build
-   per `2026-06-24-director-floor-control-design.md` (events+reducer pure first, then
-   classifier, worker, wake-time face enrollment, assembly `_build_vision` + runtime
-   start/stop, then the flag-gated `SafetyNet`/`Lockout` audio seam, default off).
-   Still in scope from the original step 5 and unchanged: capture holdout-before-finalize
-   and add verify-before-serve at session start (raise `enrollment_min_self_similarity`
-   0.6→0.80). This becomes its own plan (Director-07-vision-floor-control).
+5. **Crowd focus — CAMERA floor control (REVISED 2026-06-24; was pVAD).**
+   **✅ DONE — Director-07 SHIPPED & merged to master 2026-06-25** (commits up to
+   `a1c453a`; verdict `docs/notes/2026-06-24-director-07-live.md`; all 3 live checks
+   pass — owner-absent fires fast, no-regression with vision off, fail-safe when the
+   camera is unavailable). The pVAD path shipped and was disabled (inert conditioning).
+   FOCUS is now a separate `VisionWorker` (YuNet + SFace, CPU, ~3 fps) that self-enrolls
+   the owner at session start and emits `OwnerPresenceEvent`; the reducer adds the
+   owner-absent end-condition inside `_on_tick` (§4-revised). Built per
+   `2026-06-24-director-floor-control-design.md` (events+reducer pure first, then
+   classifier, worker, self-enrollment, assembly `_build_vision` + runtime start/stop).
+   The flag-gated `SafetyNet`/`Lockout` audio seam is a **reserved config flag with no
+   consumer yet** (deferred, default off — §9-revised).
+   **⏳ STILL OPEN from the original step 5** (NOT part of Director-07, not yet built):
+   capture holdout-before-finalize and add verify-before-serve at session start (raise
+   `enrollment_min_self_similarity` 0.6→0.80).
 6. **Interrupt-resume polish.** Bounded interrupted-stack, LLM-steered continuation (`_store_interruption`/`_maybe_inject_resume_steer` ported verbatim), auto-resume net, two-client LLM lifecycle, arbiter wiring.
 
 **Cutover criteria:** FSM reducer tests + nudge regression + all E2E scenarios green; cut-during-playback and no-orphan-after-end (incl. Section-4a greps) pass; **combined** reflex hot-path measured <100ms under live gemma load on GB10; pVAD latency spike confirms CPU budget *and* bare-model load works; verify-before-serve + nudge-then-end verified; STT re-backed and loading on CUDA. The old `TalkbackController`/pipeline paths are removed only after the Director clears every scenario.
