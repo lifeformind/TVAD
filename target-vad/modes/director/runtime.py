@@ -14,6 +14,8 @@ import sys
 
 from modes.director.result import DirectorResult
 from modes.director import commands as C
+from modes.director.reducer import gate_diag_reason
+from modes.director import events as E
 
 _DIAG = bool(os.environ.get("TVAD_DIAG"))
 
@@ -76,6 +78,12 @@ class DirectorRuntime:
                 if _DIAG and type(event).__name__ != "Tick":
                     _diag(f"event={type(event).__name__} -> state={self._director.state.name}"
                           f" cmds={[type(c).__name__ for c in commands]}{_event_text(event)}")
+                if _DIAG and isinstance(event, E.SegmentEndpointed):
+                    reason = gate_diag_reason(self._director.ctx, event)
+                    if reason is not None:
+                        _diag(f"new-turn REJECT={reason} rms={event.rms:.4f} "
+                              f"prox={self._director.ctx.proximity_rms:.4f} "
+                              f"presence={self._director.ctx.presence_status.name}")
                 for command in commands:
                     await self._route(command)
         finally:

@@ -121,6 +121,16 @@ def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
     return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
 
 
+def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
+    """DIAG-only: the reject reason for a new-turn segment, or None if accepted /
+    still accumulating. None for non-reject verdicts keeps the log quiet."""
+    v = classify_new_turn(ctx, ev)
+    if v in (TurnVerdict.REJECT_NOT_TARGET, TurnVerdict.REJECT_TOO_QUIET,
+             TurnVerdict.REJECT_OWNER_ABSENT):
+        return v.value
+    return None
+
+
 def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
     v = classify_new_turn(ctx, ev)
     if not ctx.cfg.reject_bystanders:
