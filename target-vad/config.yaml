@@ -114,6 +114,12 @@ kiosk:
       require_speaker_match: true
       speaker_threshold: 0.30      # tuned for >=2s windows (offline ~100%/100%)
       verify_window_ms: 2000       # accumulate consecutive turn audio to this, then verify
+      # Bystander gate v1 (Director-08): reject NON-owner NEW turns by proximity +
+      # camera presence (reject-by-default, "never answer a stranger"). Fail-safe:
+      # rejects only when too quiet/distant OR owner ABSENT from frame; PRESENT and
+      # UNAVAILABLE both allow. Off in code by default (no-regression); shipped on
+      # here. Only a real boolean true enables (the 'flase' lesson).
+      reject_bystanders: true
 
       # M-of-N lockout: end the session when verified WINDOW scores stop matching
       # the primary (a hijacker). Window over verified window scores; lockout

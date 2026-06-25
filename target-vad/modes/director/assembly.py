@@ -134,6 +134,7 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
         duck_level=barge.get("duck_level", 0.35),
         owner_absent_grace_s=vision.get("owner_absent_grace_s", 3.0),
         active_talk_guard_s=vision.get("active_talk_guard_s", 3.0),
+        reject_bystanders=tb_cfg.get("turn_gate", {}).get("reject_bystanders", False) is True,
     )
 
 
