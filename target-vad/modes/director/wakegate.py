@@ -32,6 +32,7 @@ import numpy as np
 from core.audio.mic_stream import MicrophoneStream
 from core.speaker.embedder import EmbeddingExtractor
 from core.vad.silero_vad import SileroVAD, SpeechSegment
+from modes.director.verify import verify_before_serve
 from modes.kiosk.wake_word import WakeWordDetector
 from modes.talkback.handoff import DirectorHandoff
 
@@ -170,14 +171,32 @@ class WakeGate:
             self._reset_to_idle()
             return
 
+        # Verify-before-serve (Director-09 spec s5): split-half self-similarity.
+        # Same-utterance halves of one speaker are highly self-similar; a noise/
+        # garbage first segment is not — so 0.80 is honest HERE, while cross-
+        # utterance verification (too noisy on short audio) is window 1's job.
+        # Only for segments >= 1.0s: halves off the 300ms VAD floor are too
+        # short to compare honestly and would false-refuse real users.
+        sr = 16000
+        if len(segment.audio) >= sr:
+            thr = self._talkback_config.get("verify_before_serve_threshold", 0.80)
+            half = len(segment.audio) // 2
+            try:
+                emb_a = self.embedder.extract(segment.audio[:half])
+                emb_b = self.embedder.extract(segment.audio[half:])
+            except Exception:
+                self._reset_to_idle()      # infra failure == the existing embed-fail path
+                return
+            ok, score = verify_before_serve(emb_a, emb_b, thr)
+            if not ok:
+                self._reset_to_idle()
+                self._safe_callback(self.on_event, "verify_refused",
+                                    {"score": float(score)})
+                return
+
         self._safe_callback(self.on_event, "session_started",
                             {"snapshot_norm": float(np.linalg.norm(embedding))})
 
-        # Placeholder holdout (Plan 05 owns the real pre-finalize capture): for
-        # now the holdout IS the first-segment/primary embedding. Acceptable
-        # ONLY because Plan 05 replaces it; verify-before-serve trivially passes
-        # at cosine(primary, primary) == 1.0 until then.
-        #
         # Stage the handoff for run() to execute AFTER _collect_handoff closes the
         # wake mic generator — so runtime.run is NOT called from inside a parked
         # generator and the Director's ingestion is the sole mic consumer. run()
@@ -187,7 +206,6 @@ class WakeGate:
         self._pending_handoff = DirectorHandoff(
             mic=self.mic,
             primary_embedding=embedding,
-            holdout_embedding=embedding,
             first_segment=segment,
             config=self._talkback_config,
             vad=self.vad,

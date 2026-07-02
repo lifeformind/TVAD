@@ -64,7 +64,7 @@ class _FakeStt:
 def _handoff(mic, vad, embedder):
     emb = np.ones(192, dtype=np.float32) / np.sqrt(192)
     return DirectorHandoff(
-        mic=mic, primary_embedding=emb, holdout_embedding=emb,
+        mic=mic, primary_embedding=emb,
         first_segment=_segment(), config=_talkback_config(),
         vad=vad, embedder=embedder,
     )

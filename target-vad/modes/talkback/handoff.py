@@ -1,9 +1,8 @@
 """Hand-off contract between the WakeGate and the Director.
 
 Renamed from TalkbackHandoff/TalkbackResult (binding interface, Plan 02).
-holdout_embedding (Plan 05) carries a pre-finalize enrollment utterance
-embedding for verify-before-serve; Plan 03 passes the first-segment embedding
-through as a placeholder until Plan 05 captures the real holdout.
+Verify-before-serve is the WakeGate's split-half check (Director-09); no
+holdout travels in the handoff.
 
 The legacy TalkbackHandoff/TalkbackResult names are retained as aliases so the
 not-yet-deleted modes/talkback/controller.py path (and its tests) keep importing.
@@ -24,7 +23,6 @@ class DirectorHandoff:
     """Payload the WakeGate passes to the Director at session start."""
     mic: Any
     primary_embedding: np.ndarray
-    holdout_embedding: np.ndarray   # Plan 05: pre-finalize utterance embedding
     first_segment: Any
     config: dict
     vad: Any
