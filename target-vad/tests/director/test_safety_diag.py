@@ -20,7 +20,8 @@ def _run(ctx, ev):
 
 def test_passing_window_line():
     line = _run(_ctx(), E.SpeakerWindowVerdict(0.85, True, 0.4))
-    assert "window=1" in line and "score=0.850" in line and "WARN" not in line
+    assert line == ("safety-net window=1 score=0.850 smoother_ok=True "
+                    "streak=0 rms=0.4000")
 
 
 def test_warn_line():
