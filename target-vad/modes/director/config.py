@@ -7,8 +7,8 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class DirectorConfig:
     # Timeouts / nudge (spec section 5)
-    silence_timeout_s: float = 30.0      # config.yaml:51
-    hard_timeout_s: float = 300.0        # config.yaml:52
+    silence_timeout_s: float = 30.0      # config.yaml
+    hard_timeout_s: float = 300.0        # config.yaml
     nudge_lead_s: float = 5.0            # NEW: nudge fires at silence == 30-5 = 25s
     # Turn-taking (spec section 6)
     endpoint_threshold: float = 0.5      # Smart Turn endpoint_prob >= this => turn complete

@@ -162,7 +162,7 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
         min_speech_ms=barge.get("min_speech_ms", 120.0),
         verify_window_ms=barge.get("verify_window_ms", 700.0),
         speaker_threshold=barge.get("speaker_threshold", 0.20),
-        conf_floor=tb_cfg.get("barge_in", {}).get("conf_floor", 0.5),
+        conf_floor=barge.get("conf_floor", 0.5),
         duck_level=barge.get("duck_level", 0.35),
         owner_absent_grace_s=vision.get("owner_absent_grace_s", 3.0),
         active_talk_guard_s=vision.get("active_talk_guard_s", 3.0),
