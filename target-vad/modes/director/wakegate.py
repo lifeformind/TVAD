@@ -22,6 +22,7 @@ tests/director/test_wakegate_single_ownership.py enforce that absence (they ban
 the literal session/timeout identifiers, so this prose avoids them too).
 """
 
+import os
 import sys
 import time
 import traceback
@@ -56,6 +57,14 @@ class WakeGate:
         kiosk_cfg = config["kiosk"]
         self._awaiting_speech_timeout_s = kiosk_cfg["awaiting_speech_timeout_s"]
         self._talkback_config = kiosk_cfg.get("talkback", {})
+
+        # Director-09 post-eject quiet-hold (port of lockout.py's idle half):
+        # after a speaker_mismatch end, ignore wakes until the near field has
+        # been quiet this long. Never permanent — quiet always clears it.
+        self._hold_idle_after_s = float(
+            self._talkback_config.get("lockout_idle_after_s", 5.0))
+        self._hold_floor: Optional[float] = None
+        self._hold_quiet_since: float = 0.0
 
         self.mic = _mic or MicrophoneStream(config["core"]["audio"])
         self.vad = _vad or SileroVAD(config["core"]["vad"])
@@ -104,6 +113,15 @@ class WakeGate:
                         break
                     result = self.runtime.run(handoff)
                     self._reset_to_idle()
+                    if (result.reason == "speaker_mismatch"
+                            and getattr(result, "proximity_rms", 0.0) > 0.0):
+                        self._hold_floor = result.proximity_rms
+                        self._hold_quiet_since = time.monotonic()
+                        if os.environ.get("TVAD_DIAG"):
+                            print(f"[DIAG wakegate] hold engaged "
+                                  f"floor={self._hold_floor:.4f} "
+                                  f"quiet_needed={self._hold_idle_after_s}s",
+                                  file=sys.stderr, flush=True)
                     self._safe_callback(self.on_event, "session_ended",
                                         {"reason": result.reason})
         except KeyboardInterrupt:
@@ -140,6 +158,19 @@ class WakeGate:
             self._handle_await_chunk(chunk)
 
     def _handle_idle_chunk(self, chunk: np.ndarray) -> None:
+        if self._hold_floor is not None:
+            rms = float(np.sqrt(np.mean(np.square(chunk)))) if len(chunk) else 0.0
+            now = time.monotonic()
+            if rms >= self._hold_floor:
+                self._hold_quiet_since = now      # still someone close -> keep holding
+                return
+            if now - self._hold_quiet_since < self._hold_idle_after_s:
+                return                            # quiet, but not long enough yet
+            self._hold_floor = None               # cleared; fall through to wake
+            if os.environ.get("TVAD_DIAG"):
+                print("[DIAG wakegate] hold cleared (near field quiet)",
+                      file=sys.stderr, flush=True)
+
         wake_score = self.wake_detector.process(chunk)
         if wake_score is not None:
             self._safe_callback(

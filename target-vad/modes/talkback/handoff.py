@@ -39,6 +39,9 @@ class DirectorResult:
     reason: str
     turns: int
     total_duration_s: float
+    # Director-09: the ended session's calibrated proximity floor, so the
+    # WakeGate's post-eject quiet-hold has a threshold. 0.0 == unknown -> no hold.
+    proximity_rms: float = 0.0
 
 
 @dataclass

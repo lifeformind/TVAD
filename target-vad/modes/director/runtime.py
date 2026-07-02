@@ -96,6 +96,7 @@ class DirectorRuntime:
             reason=self._result_reason or "stopped",
             turns=self._director.ctx.conversation.turn_count,
             total_duration_s=self._clock() - self._started_at,
+            proximity_rms=self._director.ctx.proximity_rms,
         )
 
     async def _route(self, command) -> None:
