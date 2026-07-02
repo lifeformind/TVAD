@@ -166,8 +166,14 @@ def safety_diag_line(ctx: Context, ev, commands) -> str:
     if ends:
         return f"{line} EJECT reason={ends[0].reason}"
     if not ev.smoother_ok:
-        shadow = "" if ctx.cfg.lockout_enabled else " (shadow)"
-        return f"{line} WARN{shadow}"
+        if ctx.cfg.lockout_enabled:
+            return f"{line} WARN"
+        would = ""
+        if ctx.windows_seen == 1:
+            would = " would_end=enroll_verify_failed"
+        elif ctx.miss_streak >= 2 and ev.window_rms < ctx.proximity_rms:
+            would = " would_end=speaker_mismatch"
+        return f"{line} WARN (shadow){would}"
     return line
 
 

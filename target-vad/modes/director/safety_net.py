@@ -1,11 +1,14 @@
-"""Demoted ECAPA rolling-window safety-net (off the hot path).
+"""Accumulated-window ECAPA verifier for the Director-09 hijack/verify ladder
+(off the hot path).
 
-The pVAD is primary FOCUS; this is the session-hijack detector. It accumulates
-ONLY is_target audio, embeds every verify_window_ms (108ms p95 ECAPA, run by
-the caller in an executor — fine off the hot path), and runs the M-of-N
-DecisionSmoother to catch a different person taking over for >1 window. ECAPA
-is unreliable on <2-3s segments (MEMORY: ecapa-short-segment-unreliable.md),
-so a SINGLE miss never ejects — see the de-risked lockout (lockout.py).
+SafetyNet accumulates ONLY is_target audio, embeds every verify_window_ms
+(108ms p95 ECAPA, run by the caller in an executor — fine off the hot path),
+and runs the M-of-N DecisionSmoother to catch a different person taking over
+for >1 window. It only produces a SpeakerWindowVerdict; the WARN/EJECT
+decision lives in the reducer (_on_speaker_window_verdict), and the
+post-eject quiet-hold lives in the WakeGate. ECAPA is unreliable on <2-3s
+segments (MEMORY: ecapa-short-segment-unreliable.md), so a SINGLE miss never
+ejects.
 """
 
 from dataclasses import dataclass

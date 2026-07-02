@@ -181,6 +181,13 @@ class IngestionWorker:
         if state is State.LISTENING:
             prob = await self._endpoint_prob(seg.audio)
             if self._safety is not None:
+                # Overwrite-last staging (same discipline as the STT pending buffer):
+                # if two segments endpoint before the runtime drains the first event,
+                # the later segment's audio can be consumed by the earlier segment's
+                # AccumulateSpeakerAudio. Narrow window; the 1-of-3 smoother + 2s
+                # windows + the eject rms check absorb a single mis-staged segment.
+                # Structural fix (seq echo through event->command->worker) is a
+                # recorded fast-follow.
                 self._safety.set_pending_audio(seg.audio)
             self._stt.set_pending_user_audio(seg.audio)
             await self._bus.emit(E.SegmentEndpointed(

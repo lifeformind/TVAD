@@ -40,3 +40,16 @@ def test_eject_line_carries_reason():
     ctx = _ctx()
     line = _run(ctx, E.SpeakerWindowVerdict(0.1, False, 0.4))   # window-1 fail
     assert "EJECT" in line and "enroll_verify_failed" in line
+
+
+def test_shadow_window_one_fail_shows_would_end():
+    line = _run(_ctx(lockout=False), E.SpeakerWindowVerdict(0.1, False, 0.4))
+    assert "WARN (shadow) would_end=enroll_verify_failed" in line
+
+
+def test_shadow_eject_condition_shows_would_end():
+    ctx = _ctx(lockout=False)
+    _run(ctx, E.SpeakerWindowVerdict(0.9, True, 0.4))     # window 1 passes
+    _run(ctx, E.SpeakerWindowVerdict(0.1, False, 0.1))    # streak 1
+    line = _run(ctx, E.SpeakerWindowVerdict(0.1, False, 0.1))  # streak 2, quiet
+    assert "WARN (shadow) would_end=speaker_mismatch" in line
