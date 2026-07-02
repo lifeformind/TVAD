@@ -24,3 +24,7 @@ class DirectorConfig:
     # Bystander gate v1 (Director-08, spec 2026-06-25). Reject NON-owner new turns by
     # proximity + camera presence. Default off => byte-for-byte today's reducer.
     reject_bystanders: bool = False
+    # Director-09: EJECT authority for the safety-net ladder. False = shadow mode
+    # (verdicts + WARN visibility, no session ends). Strict-bool mapped from
+    # turn_gate.lockout.enabled.
+    lockout_enabled: bool = False

@@ -26,6 +26,8 @@ class Context:
     interrupted_stack: list = field(default_factory=list)  # bounded in Plan 06
     presence_status: PresenceStatus = PresenceStatus.UNAVAILABLE  # camera floor control
     presence_since: float = 0.0          # monotonic time of the last presence change
+    windows_seen: int = 0           # SpeakerWindowVerdict count (Director-09)
+    miss_streak: int = 0            # consecutive smoother-fail windows (Director-09)
 
 
 def new_context(cfg: DirectorConfig, conversation: ConversationManager,

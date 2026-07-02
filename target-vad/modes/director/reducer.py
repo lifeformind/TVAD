@@ -65,6 +65,8 @@ def reduce(state: State, ctx: Context, event) -> tuple:
         ctx.presence_status = event.status      # pure state-recording: NO transition
         ctx.presence_since = event.now          # the owner-absent decision is on Tick
         return state, []
+    if isinstance(event, E.SpeakerWindowVerdict):
+        return _on_speaker_window_verdict(state, ctx, event)
     return state, []
 
 
@@ -94,6 +96,29 @@ def _enter_listening(ctx: Context) -> None:
     ctx.last_speech_at = ctx.now
     ctx.nudged_cycle = False
     ctx.reply_done = False
+
+
+def _on_speaker_window_verdict(state: State, ctx: Context,
+                               ev: E.SpeakerWindowVerdict) -> tuple:
+    """Director-09 hijack/verify ladder (spec s4) — port of lockout.py's decision
+    half. Window 1 failing == bad enrollment (verify-before-serve semantics, no
+    wake hold). Later failures: first smoother-fail == WARN (log-only, runtime
+    DIAG); a second consecutive fail that is ALSO below the proximity floor ==
+    EJECT (silent — never answer a stranger). A passing window resets the streak.
+    cfg.lockout_enabled False == shadow mode: counters advance, nothing ends.
+    Never touches the silence clock — verdicts are not user speech."""
+    ctx.windows_seen += 1
+    if ev.smoother_ok:
+        ctx.miss_streak = 0
+        return state, []
+    ctx.miss_streak += 1
+    if not ctx.cfg.lockout_enabled:
+        return state, []
+    if ctx.windows_seen == 1:
+        return State.IDLE, [C.EndSession("enroll_verify_failed")]
+    if ctx.miss_streak >= 2 and ev.window_rms < ctx.proximity_rms:
+        return State.IDLE, [C.EndSession("speaker_mismatch")]
+    return state, []
 
 
 class TurnVerdict(enum.Enum):
