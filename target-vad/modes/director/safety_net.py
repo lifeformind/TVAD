@@ -20,6 +20,7 @@ from core.speaker.decision_smoother import DecisionSmoother
 class SafetyVerdict:
     score: float
     smoother_ok: bool
+    window_rms: float                # RMS of the exact window audio consumed
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
@@ -53,4 +54,6 @@ class SafetyNet:
         emb = self._embedder.extract(window, sample_rate=self._sr)
         score = _cosine(emb, self._primary)
         smoother_ok = self._smoother.update(score)
-        return SafetyVerdict(score=score, smoother_ok=smoother_ok)
+        window_rms = float(np.sqrt(np.mean(np.square(window))))
+        return SafetyVerdict(score=score, smoother_ok=smoother_ok,
+                             window_rms=window_rms)

@@ -3,11 +3,11 @@ from modes.director.safety_net import SafetyVerdict
 
 
 def _fail():
-    return SafetyVerdict(score=0.0, smoother_ok=False)
+    return SafetyVerdict(score=0.0, smoother_ok=False, window_rms=0.1)
 
 
 def _pass():
-    return SafetyVerdict(score=0.9, smoother_ok=True)
+    return SafetyVerdict(score=0.9, smoother_ok=True, window_rms=0.1)
 
 
 def test_first_miss_is_warn_not_eject():

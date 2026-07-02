@@ -52,3 +52,16 @@ def test_buffer_resets_after_verify():
     sn.accumulate(np.ones(3200, dtype=np.float32), is_target=True)
     assert sn.maybe_verify() is not None        # one full window -> verdict
     assert sn.maybe_verify() is None             # window consumed -> not ready
+
+
+def test_verdict_carries_window_rms():
+    # embedder/primary fakes follow this file's existing pattern
+    class _Emb:
+        def extract(self, audio, sample_rate=16000):
+            return np.ones(4, dtype=np.float32)
+    net = SafetyNet(_Emb(), np.ones(4, dtype=np.float32),
+                    verify_window_ms=100, sr=16000)
+    net.accumulate(np.full(1600, 0.5, dtype=np.float32), is_target=True)
+    v = net.maybe_verify()
+    assert v is not None
+    assert abs(v.window_rms - 0.5) < 1e-6
