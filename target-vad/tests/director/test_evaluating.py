@@ -42,7 +42,7 @@ def test_speaker_mismatch_restores():
 def test_passing_segment_requests_transcription():
     ctx = _ctx()
     state, cmds = reduce(State.EVALUATING, ctx, _seg())
-    assert state is State.EVALUATING and cmds == [C.TranscribeInterjection()]
+    assert state is State.EVALUATING and cmds == [C.AccumulateSpeakerAudio(), C.TranscribeInterjection()]
 
 
 def test_backchannel_restores_and_keeps_talking():

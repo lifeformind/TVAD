@@ -17,14 +17,14 @@ def test_complete_target_segment_requests_transcription():
     state, cmds = reduce(State.LISTENING, ctx,
                          E.SegmentEndpointed(900.0, 0.4, is_target=True, endpoint_prob=0.8))
     assert state is State.LISTENING
-    assert cmds == [C.TranscribeUserTurn()]
+    assert cmds == [C.AccumulateSpeakerAudio(), C.TranscribeUserTurn()]
 
 
 def test_incomplete_turn_keeps_accumulating():
     ctx = _ctx()
     state, cmds = reduce(State.LISTENING, ctx,
                          E.SegmentEndpointed(300.0, 0.4, is_target=True, endpoint_prob=0.2))
-    assert state is State.LISTENING and cmds == []
+    assert state is State.LISTENING and cmds == [C.AccumulateSpeakerAudio()]
 
 
 def test_bystander_segment_is_ignored():

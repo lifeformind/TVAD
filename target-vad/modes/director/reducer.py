@@ -158,18 +158,20 @@ def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
 
 def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
     v = classify_new_turn(ctx, ev)
-    if not ctx.cfg.reject_bystanders:
-        ctx.last_speech_at = ctx.now             # legacy: any voiced segment resets
-        if v is TurnVerdict.ACCEPT:
-            return State.LISTENING, [C.TranscribeUserTurn()]
-        return State.LISTENING, []
-    # reject-by-default: only plausibly-owner speech resets the silence/presence clock
     if v in (TurnVerdict.ACCEPT, TurnVerdict.ACCUMULATE):
+        # Plausibly-owner speech: reset the silence clock and feed the safety
+        # net (Director-09) — only served speech reaches the hijack buffer, so
+        # D08-rejected bystander chatter can never eject the owner (spec s3.2).
         ctx.last_speech_at = ctx.now
+        cmds = [C.AccumulateSpeakerAudio()]
         if v is TurnVerdict.ACCEPT:
-            return State.LISTENING, [C.TranscribeUserTurn()]
-        return State.LISTENING, []
-    return State.LISTENING, []                    # rejected: no clock reset
+            cmds.append(C.TranscribeUserTurn())
+        return State.LISTENING, cmds
+    # Rejected. Legacy mode (reject_bystanders off) keeps its historical clock
+    # reset on ANY voiced segment; reject-by-default does not.
+    if not ctx.cfg.reject_bystanders:
+        ctx.last_speech_at = ctx.now
+    return State.LISTENING, []
 
 
 def _on_user_transcribed(ctx: Context, ev: E.UserTurnTranscribed) -> tuple:
@@ -208,7 +210,7 @@ def _on_interjection_segment(ctx: Context, ev: E.InterjectionSegment) -> tuple:
         return _restore_speaking(ctx)
     if ev.speaker_score < ctx.cfg.speaker_threshold:     # not the primary speaker
         return _restore_speaking(ctx)
-    return State.EVALUATING, [C.TranscribeInterjection()]
+    return State.EVALUATING, [C.AccumulateSpeakerAudio(), C.TranscribeInterjection()]
 
 
 def _on_interjection_transcribed(ctx: Context, ev: E.InterjectionTranscribed) -> tuple:
