@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 import numpy as np
 import pytest
 
@@ -60,11 +58,18 @@ async def test_subwindow_audio_emits_nothing_until_window_fills():
 @pytest.mark.asyncio
 async def test_long_audio_drains_multiple_windows_in_order():
     worker, bus = _worker(verify_window_ms=100)
-    worker.set_pending_audio(np.full(3300, 0.5, dtype=np.float32))  # 2 windows + rest
+    audio = np.concatenate([
+        np.full(1600, 0.5, dtype=np.float32),    # window 1: rms 0.5
+        np.full(1600, 0.25, dtype=np.float32),   # window 2: rms 0.25
+        np.full(100, 0.5, dtype=np.float32),     # remainder: stays buffered
+    ])
+    worker.set_pending_audio(audio)
     await worker.execute(C.AccumulateSpeakerAudio())
     events = await _events(bus)
     assert len(events) == 2
     assert all(isinstance(e, E.SpeakerWindowVerdict) for e in events)
+    assert events[0].window_rms == pytest.approx(0.5, abs=1e-6)   # window order preserved
+    assert events[1].window_rms == pytest.approx(0.25, abs=1e-6)
 
 
 @pytest.mark.asyncio
