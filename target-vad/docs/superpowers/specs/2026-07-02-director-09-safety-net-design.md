@@ -101,6 +101,12 @@ Accumulation triggers (exactly these reducer paths):
   `TranscribeInterjection`). Rejected interjections RESTORE and are not accumulated.
 - With `reject_bystanders: false` (legacy mode), ACCEPT/non-target semantics follow the
   legacy verdicts unchanged; accumulation follows the same ACCEPT/ACCUMULATE rule.
+- **Seed exclusion:** the assembly factory's seeded first segment (the enrollment
+  utterance, announced as the opening `SegmentEndpointed`) is NOT staged into the safety
+  net. If it were, window 1 would largely be the very audio the primary was derived from
+  and would trivially pass, gutting the window-1 verify. The reducer still emits
+  `AccumulateSpeakerAudio` for the seed (it is pure and cannot know); the worker's empty
+  pending buffer makes it a no-op.
 
 ### 3.3 SafetyNetWorker
 
@@ -151,7 +157,11 @@ New `DirectorResult` reasons: `enroll_verify_failed`, `speaker_mismatch`.
 
 In `_start_session_from_segment`, before staging the handoff:
 1. Split the first segment's audio in half; embed both halves (2 extra ECAPA extracts,
-   ~200ms, pre-serve so off every hot path).
+   ~200ms, pre-serve so off every hot path). **Only when the segment is ≥ 1.0s** (halves
+   ≥ 0.5s): the VAD floor is 300ms and 150ms halves are too short for an honest 0.80
+   comparison (would false-refuse real users). Shorter first segments skip the split-half
+   check and rely on window 1. An embedder exception on a half is treated like the
+   existing first-embed failure: reset to IDLE, no session.
 2. `ok, score = verify_before_serve(emb_h1, emb_h2, threshold)` with
    `threshold = kiosk.talkback.verify_before_serve_threshold` (0.80). Same-utterance halves
    of one speaker are highly self-similar; noise/garbage/degenerate embeddings are not —
