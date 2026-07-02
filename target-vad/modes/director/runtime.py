@@ -38,7 +38,7 @@ def _event_text(event) -> str:
 
 class DirectorRuntime:
     def __init__(self, director, bus, watchdog, ingestion, stt_worker,
-                 generation, playback, clock, vision=None):
+                 generation, playback, clock, vision=None, safety_worker=None):
         self._director = director
         self._bus = bus
         self._watchdog = watchdog
@@ -47,6 +47,7 @@ class DirectorRuntime:
         self._generation = generation
         self._playback = playback
         self._vision = vision
+        self._safety = safety_worker
         self._clock = clock
         self._started_at = clock()
         self._result_reason = None
@@ -106,6 +107,9 @@ class DirectorRuntime:
             self._gen_task = asyncio.create_task(self._generation.execute(command))
         elif isinstance(command, C.Cut):
             await self._generation.execute(command)
+        elif isinstance(command, C.AccumulateSpeakerAudio):
+            if self._safety is not None:
+                await self._safety.execute(command)
         elif isinstance(command, C.EndSession):
             self._result_reason = command.reason
             self._watchdog.request_stop(command.reason)

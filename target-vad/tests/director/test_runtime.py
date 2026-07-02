@@ -119,3 +119,19 @@ async def test_end_session_sets_result_and_stops():
     asyncio.create_task(drive())
     result = await asyncio.wait_for(rt.run_async(), timeout=5.0)
     assert result.reason == "hard_timeout"
+
+
+@pytest.mark.asyncio
+async def test_accumulate_command_routes_to_safety_worker():
+    rt, bus, director, playback, generation = build_runtime(lambda: 0.0)
+    safety = MagicMock()
+    safety.execute = AsyncMock()
+    rt._safety = safety
+    await rt._route(C.AccumulateSpeakerAudio())
+    safety.execute.assert_awaited_once_with(C.AccumulateSpeakerAudio())
+
+
+@pytest.mark.asyncio
+async def test_accumulate_command_with_no_safety_worker_is_noop():
+    rt, bus, director, playback, generation = build_runtime(lambda: 0.0)
+    await rt._route(C.AccumulateSpeakerAudio())    # must not raise
