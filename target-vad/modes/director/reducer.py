@@ -156,6 +156,21 @@ def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
     return None
 
 
+def safety_diag_line(ctx: Context, ev, commands) -> str:
+    """DIAG-only formatting for a SpeakerWindowVerdict (spec s7). Pure — the
+    runtime prints. Call AFTER dispatch: ctx counters are already advanced."""
+    line = (f"safety-net window={ctx.windows_seen} score={ev.score:.3f} "
+            f"smoother_ok={ev.smoother_ok} streak={ctx.miss_streak} "
+            f"rms={ev.window_rms:.4f}")
+    ends = [c for c in commands if isinstance(c, C.EndSession)]
+    if ends:
+        return f"{line} EJECT reason={ends[0].reason}"
+    if not ev.smoother_ok:
+        shadow = "" if ctx.cfg.lockout_enabled else " (shadow)"
+        return f"{line} WARN{shadow}"
+    return line
+
+
 def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
     v = classify_new_turn(ctx, ev)
     if v in (TurnVerdict.ACCEPT, TurnVerdict.ACCUMULATE):

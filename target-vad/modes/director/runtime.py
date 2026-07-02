@@ -14,7 +14,7 @@ import sys
 
 from modes.director.result import DirectorResult
 from modes.director import commands as C
-from modes.director.reducer import gate_diag_reason
+from modes.director.reducer import gate_diag_reason, safety_diag_line
 from modes.director import events as E
 
 _DIAG = bool(os.environ.get("TVAD_DIAG"))
@@ -85,6 +85,8 @@ class DirectorRuntime:
                         _diag(f"new-turn REJECT={reason} rms={event.rms:.4f} "
                               f"prox={self._director.ctx.proximity_rms:.4f} "
                               f"presence={self._director.ctx.presence_status.name}")
+                if _DIAG and isinstance(event, E.SpeakerWindowVerdict):
+                    _diag(safety_diag_line(self._director.ctx, event, commands))
                 for command in commands:
                     await self._route(command)
         finally:
