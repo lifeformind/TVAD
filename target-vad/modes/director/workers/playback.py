@@ -100,7 +100,13 @@ class PlaybackWorker:
         if fut is not None:
             try:
                 await asyncio.shield(fut)
-            except Exception:
+            except (asyncio.CancelledError, Exception):
+                # CancelledError is a BaseException: it arrives here when the
+                # generation task was cancelled mid-play (its cancellation
+                # cancels _play_future's asyncio wrapper while the executor
+                # write thread keeps running). The stream stays safe without
+                # awaiting that thread: close() bumps _play_gen and holds
+                # _write_lock, so the writer exits at its next frame.
                 pass
 
     def _play_audio(self, audio: np.ndarray, gen: int) -> None:
