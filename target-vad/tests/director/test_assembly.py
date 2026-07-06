@@ -64,7 +64,7 @@ class _FakeStt:
 def _handoff(mic, vad, embedder):
     emb = np.ones(192, dtype=np.float32) / np.sqrt(192)
     return DirectorHandoff(
-        mic=mic, primary_embedding=emb, holdout_embedding=emb,
+        mic=mic, primary_embedding=emb,
         first_segment=_segment(), config=_talkback_config(),
         vad=vad, embedder=embedder,
     )
@@ -175,3 +175,68 @@ def test_build_pvad_disabled_returns_none():
 def test_build_pvad_no_embedding_returns_none():
     from modes.director.assembly import _build_pvad
     assert _build_pvad(None, 0.02, {"crowd_focus": {"enabled": True}}) is None
+
+
+def test_safety_net_requires_strict_bool_true():
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    emb = object()
+    prim = np.ones(4, dtype=np.float32)
+    bus = EventBus()
+    on = {"turn_gate": {"require_speaker_match": True}}
+    off = {"turn_gate": {"require_speaker_match": False}}
+    truthy_string = {"turn_gate": {"require_speaker_match": "true"}}
+    missing = {}
+    assert _build_safety_net(on, prim, emb, bus) is not None
+    assert _build_safety_net(off, prim, emb, bus) is None
+    assert _build_safety_net(truthy_string, prim, emb, bus) is None
+    assert _build_safety_net(missing, prim, emb, bus) is None
+
+
+def test_safety_net_none_without_embedder_or_primary():
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    cfg = {"turn_gate": {"require_speaker_match": True}}
+    assert _build_safety_net(cfg, None, object(), EventBus()) is None
+    assert _build_safety_net(cfg, np.ones(4), None, EventBus()) is None
+
+
+def test_lockout_enabled_strict_bool_mapping():
+    from modes.director.assembly import _director_config_from
+    assert _director_config_from(
+        {"turn_gate": {"lockout": {"enabled": True}}}).lockout_enabled is True
+    assert _director_config_from(
+        {"turn_gate": {"lockout": {"enabled": "true"}}}).lockout_enabled is False
+    assert _director_config_from({}).lockout_enabled is False
+
+
+def test_nudge_lead_and_conf_floor_are_mapped():
+    from modes.director.assembly import _director_config_from
+    cfg = _director_config_from({"nudge_lead_s": 7.5,
+                                 "barge_in": {"conf_floor": 0.65}})
+    assert cfg.nudge_lead_s == 7.5
+    assert cfg.conf_floor == 0.65
+
+
+def test_shipped_config_yaml_matches_live_readers():
+    import yaml
+    with open("config.yaml") as f:
+        full = yaml.safe_load(f)
+    tb = full["kiosk"]["talkback"]
+    # keys this feature makes/keeps live
+    assert tb["turn_gate"]["require_speaker_match"] is True
+    assert tb["turn_gate"]["lockout"]["enabled"] is True
+    assert tb["turn_gate"]["endpoint_threshold"] == 0.5
+    assert tb["verify_before_serve_threshold"] == 0.80
+    assert tb["lockout_idle_after_s"] == 5
+    assert tb["nudge_lead_s"] == 5.0
+    assert tb["barge_in"]["conf_floor"] == 0.5
+    assert tb["watchdog"]["tick_ms"] == 500
+    # dead keys must be GONE
+    assert "decision_smoother" not in full["kiosk"]
+    assert "suppression_level" not in tb["aec"]
+    assert "partials_every_ms" not in tb["stt"]
+    assert "require_speaker_match" not in tb["barge_in"]
+    assert "audio_safety_net" not in tb["vision"]
+    assert "resume" not in tb
+    assert "include_partial_transcripts" not in tb["logging"]

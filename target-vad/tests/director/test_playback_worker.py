@@ -99,6 +99,24 @@ class TestTeardown:
         order.append("close")
         assert order[-1] == "close"                     # close strictly after drain
 
+    @pytest.mark.asyncio
+    async def test_drain_survives_cancelled_play_future(self):
+        # Live crash (2026-07-06 Check 2): a session end during active TTS
+        # cancels the generation task, which is suspended awaiting
+        # _play_future — task cancellation cancels that future's asyncio
+        # wrapper (the executor write thread keeps running). drain() then
+        # shields an already-cancelled future, which raises CancelledError;
+        # as a BaseException (Python 3.8+) it escaped `except Exception`
+        # and killed the kiosk in teardown. drain() must swallow it —
+        # stream safety still holds via close()'s gen-bump + write lock.
+        w = make_worker()
+        import asyncio
+        fut = asyncio.get_running_loop().create_future()
+        fut.cancel()
+        w._play_future = fut
+        await w.drain()                                 # must not raise
+        w.close()                                       # close still safe after
+
 
 class TestCommands:
     @pytest.mark.asyncio

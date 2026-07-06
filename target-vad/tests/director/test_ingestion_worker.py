@@ -75,7 +75,7 @@ def _seg(duration_ms=900.0, level=0.5):
                          start_ms=0.0, end_ms=duration_ms, duration_ms=duration_ms)
 
 
-def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9, pvad=None):
+def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9, pvad=None, safety=None):
     bus = EventBus()
     stt = MagicMock()
     stt.set_pending_user_audio = MagicMock()
@@ -93,6 +93,7 @@ def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9, pvad=None):
         state_getter=lambda: state,
         score_fn=lambda a, b: embedder_score,    # injected cosine (no real ECAPA)
         pvad=pvad,
+        safety_worker=safety,
     )
     return w, bus, stt
 
@@ -222,3 +223,24 @@ async def test_apply_aec_uses_real_playback_worker_reference(monkeypatch):
     # Must not raise AttributeError; returns processed audio of the same length.
     out = w._apply_aec(np.zeros(480, dtype=np.float32), State.SPEAKING)
     assert out is not None and len(out) == 480
+
+
+@pytest.mark.asyncio
+async def test_listening_segment_staged_into_safety_worker():
+    seg = _seg()
+    safety = MagicMock()
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]]),
+                              State.LISTENING, safety=safety)
+    await _run_briefly(w)
+    safety.set_pending_audio.assert_called_once()
+    assert np.array_equal(safety.set_pending_audio.call_args[0][0], seg.audio)
+
+
+@pytest.mark.asyncio
+async def test_evaluating_segment_staged_into_safety_worker():
+    seg = _seg()
+    safety = MagicMock()
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]]),
+                              State.EVALUATING, safety=safety)
+    await _run_briefly(w)
+    safety.set_pending_audio.assert_called_once()

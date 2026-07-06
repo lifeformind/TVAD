@@ -18,7 +18,12 @@ core:
     enrollment_max_retries: 3
 
   audio:
-    device_index: null
+    # Capture goes through PipeWire; the mic is whatever PipeWire's default
+    # source is — kept on the ReSpeaker 4 Mic Array (the production mic; the
+    # C10 is camera duty). PortAudio cannot open the array directly, so
+    # "pipewire" is the only path. Far-field array => proximity floors run
+    # ~0.01 (vs ~0.06 near-field C10); do not compare floors across mics.
+    device_index: "pipewire"
     channels: 1
     sample_rate: 16000
     chunk_size: 480
@@ -31,10 +36,6 @@ kiosk:
   wake_phrase: "hey_mycroft"
   wake_threshold: 0.5
   awaiting_speech_timeout_s: 15
-  decision_smoother:
-    window_size: 3
-    min_matches: 2
-    threshold: 0.50   # tuned for C10 + classroom DSP; raise once non-self baseline measured
 
   talkback_enabled: false
 
@@ -50,19 +51,24 @@ kiosk:
     # kiosk.session_*_timeout_s keys (a second, racing authority) are DELETED.
     silence_timeout_s: 30
     hard_timeout_s: 300
+    # Nudge fires this many seconds BEFORE silence_timeout ("are you still
+    # there?"). Read by the Director reducer; was previously a silent default.
+    nudge_lead_s: 5.0
+    # Watchdog tick cadence (ms) — the Director's single clock source.
+    watchdog:
+      tick_ms: 500
 
-    # Director verify-before-serve (Plan 05): refuse to start a session when the
-    # finalized primary embedding disagrees with the pre-finalize holdout utterance
-    # (cosine < threshold) -> return to IDLE + re-enroll rather than serving a bad
-    # voiceprint. 0.80 = ~2% EER on >=5s cumulative audio.
+    # Verify-before-serve (Director-09): split-half self-similarity of the FIRST
+    # segment (same-utterance halves; only runs on segments >=1.0s). Below this
+    # -> refuse to serve (no session), re-wake immediately. Cross-utterance
+    # verification is the safety net's window-1 job (turn_gate below).
     verify_before_serve_threshold: 0.80
-    # De-risked lockout: after an EJECT, accept a fresh wake once there has been no
-    # near-field RMS for this long (never a permanent lockout).
+    # After a speaker_mismatch EJECT, accept a fresh wake only once the near
+    # field has been quiet this long (never a permanent lockout). Director-09.
     lockout_idle_after_s: 5
 
     aec:
       enabled: true
-      suppression_level: "high"
 
     stt:
       # Re-backed off faster-whisper (no aarch64 CUDA wheel on GB10) onto
@@ -70,7 +76,6 @@ kiosk:
       backend: "openai-whisper"   # "openai-whisper" (proven on GB10) | "nemo" (Plan 04 Task 7)
       model: "small.en"           # GB10 p95: tiny 67ms / base.en 84ms / small.en 189ms / medium.en 415ms (word_timestamps on, self.wav 3s). small.en = accuracy/latency balance for uncommon words
       device: "cuda"              # GB10 CUDA; fallback is NOT supported (faster-whisper banned)
-      partials_every_ms: 300      # reserved (no streaming-partial path in V1; full-segment STT)
       end_of_utterance_tail_ms: 400
       # mean_word_prob from StreamingStt feeds the Director's empty/low-confidence
       # RESTORE guard: transcripts with mean_word_prob < barge_in.conf_floor (0.5)
@@ -94,39 +99,34 @@ kiosk:
       sentence_terminators: [".", "?", "!"]
       max_chunk_chars: 120
 
-    # Per-turn speaker lock: NEW turns (not just barge-in) must match the
-    # enrolled primary speaker, else a bystander who speaks in the gap between
-    # TTS replies would be transcribed and answered.
-    #
-    # ECAPA cosine on a SINGLE conversational turn (~0.3-1.5s) can't separate
-    # the enrolled speaker from a bystander — live scores scatter from -0.14 to
-    # 0.60 for both, so no per-turn threshold works. Similarity is reliable only
-    # on longer audio (offline self vs other: 2.0s -> thr 0.30 gives ~100%
-    # accept-self / ~100% reject-other). So we DON'T judge turns alone:
-    # consecutive turn audio accumulates into a rolling buffer and, once it
-    # reaches verify_window_ms, the whole window is embedded and scored at once.
-    # Sub-window turns are served provisionally (logged turn_gate_pending) and
-    # fed into the next window, so a brief utterance never false-rejects the
-    # real user. A bystander leaks until the window fills, then it rejects and
-    # the M-of-N lockout ends the session. See docs/speaker-gate-measurement.md;
-    # inspect live scores with `bench/speaker_scores.py --source turn_gate`.
+    # Director-09 speaker safety net: NEW turns already pass the bystander gate
+    # (reject_bystanders below); this layer catches what proximity+camera can't —
+    # a session hijack / close loud bystander. Consecutive SERVED turn audio
+    # accumulates; every verify_window_ms window is ECAPA-scored against the
+    # primary (short single turns are never judged alone — see
+    # docs/speaker-gate-measurement.md). Window 1 failing = bad enrollment ->
+    # session ends (enroll_verify_failed). Later: 3 consecutive failing windows
+    # (M-of-N below) = WARN (log-only); a second consecutive smoother-fail that
+    # is ALSO below the proximity floor = silent EJECT (speaker_mismatch).
     turn_gate:
-      require_speaker_match: true
-      speaker_threshold: 0.30      # tuned for >=2s windows (offline ~100%/100%)
-      verify_window_ms: 2000       # accumulate consecutive turn audio to this, then verify
+      require_speaker_match: true  # master enable (strict-bool; only real `true`)
+      speaker_threshold: 0.15      # live-tuned 2026-07-06 (was 0.30, offline-derived):
+                                   # owner 2s windows score 0.230-0.466 live (array mic,
+                                   # interjection windows carry TTS bleed); stranger scored
+                                   # 0.069. 0.30 sat inside the owner band -> two window-1
+                                   # false ejects. 0.15 = midpoint of the live gap.
+      verify_window_ms: 2000       # accumulate served turn audio to this, then verify
+      endpoint_threshold: 0.5      # Smart Turn endpoint_prob >= this => turn complete
       # Bystander gate v1 (Director-08): reject NON-owner NEW turns by proximity +
       # camera presence (reject-by-default, "never answer a stranger"). Fail-safe:
       # rejects only when too quiet/distant OR owner ABSENT from frame; PRESENT and
       # UNAVAILABLE both allow. Off in code by default (no-regression); shipped on
       # here. Only a real boolean true enables (the 'flase' lesson).
       reject_bystanders: true
-
-      # M-of-N lockout: end the session when verified WINDOW scores stop matching
-      # the primary (a hijacker). Window over verified window scores; lockout
-      # when fewer than min_matches of the last window_size cross the threshold.
-      # Default (1 of 3) ends the session after 3 consecutive rejecting windows
-      # (~6s of non-matching speech) — near-certain for a bystander, vanishingly
-      # rare for the real user at the >=2s window false-reject rate.
+      # EJECT authority. false = shadow mode: verdicts + WARN DIAG, no session
+      # ends — the graduated-rollout knob. window_size/min_matches = the M-of-N
+      # smoother over window scores (1-of-3: fails only after 3 consecutive
+      # misses ~6s of served non-matching speech).
       lockout:
         enabled: true
         window_size: 3
@@ -144,9 +144,9 @@ kiosk:
     #   bench/speaker_scores.py --source barge_in
     barge_in:
       enabled: true
-      require_speaker_match: true
       min_speech_ms: 120
       speaker_threshold: 0.20      # provisional; live barge-ins (AEC on) scored ~0.12-0.41
+      conf_floor: 0.5              # interjection mean_word_prob below this => RESTORE
       verify_window_ms: 700        # 1200 rejected most real barge-ins as too_short; proximity guards bystanders
       duck_level: 0.35             # TTS gain while capturing an interruption; partial (not near-silent) so a rejected interjection doesn't lose the reply's tail. Watch: louder duck = more self-voice in the mic for AEC to cancel
       duck_ramp_ms: 120
@@ -185,21 +185,9 @@ kiosk:
       owner_absent_grace_s: 3.0 # sustained ABSENT this long => free the kiosk
       active_talk_guard_s: 3.0  # never owner-absent-end within this of owner speech
       enroll_frames: 8          # owner face-reference frames captured at session start
-      # Reserved: the deferred audio speaker-check seam (spec §9). NOT wired in this
-      # plan — revisit after live data (Q3/Q5 deferred). No consumer reads this yet.
-      audio_safety_net:
-        enabled: false
-
-    # Interruption-resume: after answering an interruption, the AI offers to
-    # continue the prior topic and, on confirmation, resumes from where it left
-    # off. Controller owns the resume lifecycle; the LLM phrases the offer and
-    # continuation. See docs/superpowers/specs/2026-06-12-verified-bargein-resume-design.md
-    resume:
-      enabled: true
 
     logging:
       jsonl_path: "logs/kiosk-{date}-{session_id}.jsonl"
-      include_partial_transcripts: false
 
 diarization:
   identification_threshold: 0.55

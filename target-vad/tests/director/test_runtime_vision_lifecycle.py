@@ -37,6 +37,7 @@ class _Director:
         class conversation:
             turn_count = 0
         conversation = conversation()
+        proximity_rms = 0.0
     ctx = _Ctx()
 
     def dispatch(self, event):

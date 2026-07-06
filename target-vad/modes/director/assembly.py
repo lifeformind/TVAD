@@ -36,6 +36,8 @@ from modes.director.watchdog import AsyncWatchdog
 from modes.director.workers.generation import GenerationWorker
 from modes.director.workers.ingestion import IngestionWorker
 from modes.director.workers.playback import PlaybackWorker
+from modes.director.safety_net import SafetyNet
+from modes.director.workers.safety_net import SafetyNetWorker
 from modes.director.workers.stt_worker import SttWorker
 from modes.director import events as E
 from modes.director.vision.opencv_backend import OpenCvBackend, cv2_available as _cv2_available
@@ -119,6 +121,34 @@ def _build_vision(tb_cfg: dict, *, bus):
         enroll_frames=v.get("enroll_frames", 8))
 
 
+def _build_safety_net(tb_cfg: dict, primary_embedding, embedder, bus):
+    """Build the Director-09 accumulated-window ECAPA safety net, or None (no
+    hijack detection — byte-for-byte Director-08 behavior). Strict-bool enable:
+    only a real True builds it (the 'flase' lesson); warn on a present non-bool."""
+    tg = tb_cfg.get("turn_gate", {})
+    enabled = tg.get("require_speaker_match", False)
+    if enabled is not True:
+        if "require_speaker_match" in tg and not isinstance(enabled, bool):
+            print(f"[director] turn_gate.require_speaker_match is not a boolean "
+                  f"(got {enabled!r}) -> safety net disabled",
+                  file=sys.stderr, flush=True)
+        return None
+    if embedder is None or primary_embedding is None:
+        return None
+    lock = tg.get("lockout", {})
+    net = SafetyNet(
+        embedder, primary_embedding,
+        verify_window_ms=tg.get("verify_window_ms", 2000),
+        threshold=tg.get("speaker_threshold", 0.30),
+        window_size=lock.get("window_size", 3),
+        min_matches=lock.get("min_matches", 1),
+        sr=tb_cfg.get("sample_rate_hz", 16000),
+    )
+    print("[director] safety net ENABLED (accumulated-window ECAPA)",
+          file=sys.stderr, flush=True)
+    return SafetyNetWorker(net, bus)
+
+
 def _director_config_from(tb_cfg: dict) -> DirectorConfig:
     """Map the kiosk.talkback.* config onto the frozen DirectorConfig. Pulls the
     same keys the reducer's thresholds came from (spec section 5/6)."""
@@ -127,14 +157,18 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
     return DirectorConfig(
         silence_timeout_s=tb_cfg.get("silence_timeout_s", 30.0),
         hard_timeout_s=tb_cfg.get("hard_timeout_s", 300.0),
+        nudge_lead_s=tb_cfg.get("nudge_lead_s", 5.0),
         endpoint_threshold=tb_cfg.get("turn_gate", {}).get("endpoint_threshold", 0.5),
         min_speech_ms=barge.get("min_speech_ms", 120.0),
         verify_window_ms=barge.get("verify_window_ms", 700.0),
         speaker_threshold=barge.get("speaker_threshold", 0.20),
+        conf_floor=barge.get("conf_floor", 0.5),
         duck_level=barge.get("duck_level", 0.35),
         owner_absent_grace_s=vision.get("owner_absent_grace_s", 3.0),
         active_talk_guard_s=vision.get("active_talk_guard_s", 3.0),
         reject_bystanders=tb_cfg.get("turn_gate", {}).get("reject_bystanders", False) is True,
+        lockout_enabled=tb_cfg.get("turn_gate", {}).get("lockout", {})
+                              .get("enabled", False) is True,
     )
 
 
@@ -278,12 +312,14 @@ def build_director_runtime(
     )
 
     pvad = _build_pvad(handoff.primary_embedding, proximity_rms, tb_cfg)
+    safety = _build_safety_net(tb_cfg, handoff.primary_embedding,
+                               handoff.embedder, bus)
     ingestion = IngestionWorker(
         mic=handoff.mic, vad=handoff.vad, aec=aec, turn_detector=turn_detector,
         embedder=handoff.embedder, primary_embedding=handoff.primary_embedding,
         stt_worker=stt_worker, playback=playback, bus=bus, cfg=cfg,
         proximity_rms=proximity_rms, state_getter=lambda: director.state,
-        score_fn=cosine_similarity, pvad=pvad,
+        score_fn=cosine_similarity, pvad=pvad, safety_worker=safety,
     )
 
     vision = _build_vision(tb_cfg, bus=bus)
@@ -296,7 +332,7 @@ def build_director_runtime(
     runtime = DirectorRuntime(
         director=director, bus=bus, watchdog=watchdog, ingestion=ingestion,
         stt_worker=stt_worker, generation=generation, playback=playback,
-        clock=clock, vision=vision,
+        clock=clock, vision=vision, safety_worker=safety,
     )
     return DirectorRuntimeFactory(runtime, bus, stt_worker, handoff.first_segment)
 

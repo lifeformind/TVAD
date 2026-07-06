@@ -165,8 +165,13 @@ def test_deleted_config_keys_are_absent():
     cfg_text = (REPO / "config.yaml").read_text()
     assert "session_silence_timeout_s" not in cfg_text
     assert "session_hard_timeout_s" not in cfg_text
-    # the dead pipeline watchdog block is gone too
-    assert not re.search(r"^\s*watchdog:\s*$", cfg_text, re.MULTILINE), \
+    # the dead top-level kiosk.watchdog block (2-space indent, sibling of
+    # talkback) is gone too — it powered only the deleted pipeline watchdog.
+    # kiosk.talkback.watchdog.tick_ms (4-space, nested under talkback) is a
+    # DIFFERENT, live key: the Director's AsyncWatchdog tick cadence
+    # (Director-09), read by assembly.py/controller.py — not a regression of
+    # this one.
+    assert not re.search(r"^  watchdog:\s*$", cfg_text, re.MULTILINE), \
         "kiosk.watchdog powered only the deleted pipeline watchdog"
 
 

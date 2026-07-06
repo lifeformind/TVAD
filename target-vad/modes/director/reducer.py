@@ -65,6 +65,8 @@ def reduce(state: State, ctx: Context, event) -> tuple:
         ctx.presence_status = event.status      # pure state-recording: NO transition
         ctx.presence_since = event.now          # the owner-absent decision is on Tick
         return state, []
+    if isinstance(event, E.SpeakerWindowVerdict):
+        return _on_speaker_window_verdict(state, ctx, event)
     return state, []
 
 
@@ -94,6 +96,29 @@ def _enter_listening(ctx: Context) -> None:
     ctx.last_speech_at = ctx.now
     ctx.nudged_cycle = False
     ctx.reply_done = False
+
+
+def _on_speaker_window_verdict(state: State, ctx: Context,
+                               ev: E.SpeakerWindowVerdict) -> tuple:
+    """Director-09 hijack/verify ladder (spec s4) — port of lockout.py's decision
+    half. Window 1 failing == bad enrollment (verify-before-serve semantics, no
+    wake hold). Later failures: first smoother-fail == WARN (log-only, runtime
+    DIAG); a second consecutive fail that is ALSO below the proximity floor ==
+    EJECT (silent — never answer a stranger). A passing window resets the streak.
+    cfg.lockout_enabled False == shadow mode: counters advance, nothing ends.
+    Never touches the silence clock — verdicts are not user speech."""
+    ctx.windows_seen += 1
+    if ev.smoother_ok:
+        ctx.miss_streak = 0
+        return state, []
+    ctx.miss_streak += 1
+    if not ctx.cfg.lockout_enabled:
+        return state, []
+    if ctx.windows_seen == 1:
+        return State.IDLE, [C.EndSession("enroll_verify_failed")]
+    if ctx.miss_streak >= 2 and ev.window_rms < ctx.proximity_rms:
+        return State.IDLE, [C.EndSession("speaker_mismatch")]
+    return state, []
 
 
 class TurnVerdict(enum.Enum):
@@ -131,20 +156,43 @@ def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
     return None
 
 
+def safety_diag_line(ctx: Context, ev, commands) -> str:
+    """DIAG-only formatting for a SpeakerWindowVerdict (spec s7). Pure — the
+    runtime prints. Call AFTER dispatch: ctx counters are already advanced."""
+    line = (f"safety-net window={ctx.windows_seen} score={ev.score:.3f} "
+            f"smoother_ok={ev.smoother_ok} streak={ctx.miss_streak} "
+            f"rms={ev.window_rms:.4f}")
+    ends = [c for c in commands if isinstance(c, C.EndSession)]
+    if ends:
+        return f"{line} EJECT reason={ends[0].reason}"
+    if not ev.smoother_ok:
+        if ctx.cfg.lockout_enabled:
+            return f"{line} WARN"
+        would = ""
+        if ctx.windows_seen == 1:
+            would = " would_end=enroll_verify_failed"
+        elif ctx.miss_streak >= 2 and ev.window_rms < ctx.proximity_rms:
+            would = " would_end=speaker_mismatch"
+        return f"{line} WARN (shadow){would}"
+    return line
+
+
 def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
     v = classify_new_turn(ctx, ev)
-    if not ctx.cfg.reject_bystanders:
-        ctx.last_speech_at = ctx.now             # legacy: any voiced segment resets
-        if v is TurnVerdict.ACCEPT:
-            return State.LISTENING, [C.TranscribeUserTurn()]
-        return State.LISTENING, []
-    # reject-by-default: only plausibly-owner speech resets the silence/presence clock
     if v in (TurnVerdict.ACCEPT, TurnVerdict.ACCUMULATE):
+        # Plausibly-owner speech: reset the silence clock and feed the safety
+        # net (Director-09) — only served speech reaches the hijack buffer, so
+        # D08-rejected bystander chatter can never eject the owner (spec s3.2).
         ctx.last_speech_at = ctx.now
+        cmds = [C.AccumulateSpeakerAudio()]
         if v is TurnVerdict.ACCEPT:
-            return State.LISTENING, [C.TranscribeUserTurn()]
-        return State.LISTENING, []
-    return State.LISTENING, []                    # rejected: no clock reset
+            cmds.append(C.TranscribeUserTurn())
+        return State.LISTENING, cmds
+    # Rejected. Legacy mode (reject_bystanders off) keeps its historical clock
+    # reset on ANY voiced segment; reject-by-default does not.
+    if not ctx.cfg.reject_bystanders:
+        ctx.last_speech_at = ctx.now
+    return State.LISTENING, []
 
 
 def _on_user_transcribed(ctx: Context, ev: E.UserTurnTranscribed) -> tuple:
@@ -183,7 +231,7 @@ def _on_interjection_segment(ctx: Context, ev: E.InterjectionSegment) -> tuple:
         return _restore_speaking(ctx)
     if ev.speaker_score < ctx.cfg.speaker_threshold:     # not the primary speaker
         return _restore_speaking(ctx)
-    return State.EVALUATING, [C.TranscribeInterjection()]
+    return State.EVALUATING, [C.AccumulateSpeakerAudio(), C.TranscribeInterjection()]
 
 
 def _on_interjection_transcribed(ctx: Context, ev: E.InterjectionTranscribed) -> tuple:

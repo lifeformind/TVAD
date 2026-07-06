@@ -5,16 +5,16 @@ interface, owned by Plan 02; asserted here so Plan 03 is self-contained)."""
 import numpy as np
 
 
-def test_director_handoff_has_holdout_embedding_field():
+def test_director_handoff_has_no_holdout_embedding_field():
     from modes.talkback.handoff import DirectorHandoff
     emb = np.ones(192, dtype=np.float32)
     h = DirectorHandoff(
-        mic="mic", primary_embedding=emb, holdout_embedding=emb,
+        mic="mic", primary_embedding=emb,
         first_segment="seg", config={}, vad="vad", embedder="emb",
     )
-    assert h.holdout_embedding is emb
     assert h.primary_embedding is emb
     assert h.mic == "mic"
+    assert not hasattr(h, "holdout_embedding")
 
 
 def test_director_result_carries_reason_turns_duration():

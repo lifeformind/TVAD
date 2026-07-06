@@ -79,3 +79,13 @@ class OwnerPresenceEvent:
     transition; the owner-absent decision happens on a Tick."""
     status: PresenceStatus
     now: float
+
+
+@dataclass(frozen=True)
+class SpeakerWindowVerdict:
+    """Accumulated-window ECAPA verdict from the SafetyNetWorker (Director-09).
+    Pure data; the reducer owns the WARN/EJECT decision. No clock field — the
+    ladder is not time-based (the post-eject quiet clock lives in the WakeGate)."""
+    score: float                     # cosine(window embedding, primary)
+    smoother_ok: bool                # M-of-N smoother output for this window
+    window_rms: float                # RMS over the window audio (eject rms check)

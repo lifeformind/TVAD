@@ -184,15 +184,6 @@ class TestHandoff:
         assert handoff.embedder is fake_embedder
         assert handoff.primary_embedding.shape == (192,)
 
-    def test_holdout_embedding_is_first_segment_embedding_placeholder(
-            self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime):
-        # Plan 05 replaces this with the real pre-finalize holdout. For Plan 03
-        # the holdout IS the first-segment (primary) embedding.
-        g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime)
-        self._drive_to_handoff(g, fake_wake, fake_vad)
-        handoff = fake_runtime.run.call_args[0][0]
-        assert np.array_equal(handoff.holdout_embedding, handoff.primary_embedding)
-
     def test_handoff_passes_talkback_config(
             self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime):
         g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime)
@@ -268,3 +259,80 @@ class TestEventCallbackRobustness:
         )
         drive_one_cycle(g, fake_wake, fake_vad)            # buggy events swallowed
         assert g._state == "IDLE"                          # still completed the cycle
+
+
+class _SplitEmbedder:
+    """Full-segment extract -> normalized ones; halves -> scripted vectors."""
+    def __init__(self, half_a, half_b):
+        self._returns = [np.ones(192, dtype=np.float32) / np.sqrt(192),
+                         half_a, half_b]
+        self.calls = 0
+
+    def extract(self, audio):
+        v = self._returns[min(self.calls, len(self._returns) - 1)]
+        self.calls += 1
+        return v
+
+
+def _orthogonal_pair():
+    a = np.zeros(192, dtype=np.float32); a[0] = 1.0
+    b = np.zeros(192, dtype=np.float32); b[1] = 1.0
+    return a, b                                     # cosine == 0.0 < 0.80
+
+
+class TestVerifyBeforeServe:
+    def test_split_half_mismatch_refuses_session(
+            self, base_config, fake_mic, fake_vad, fake_wake, fake_runtime):
+        a, b = _orthogonal_pair()
+        emb = _SplitEmbedder(a, b)
+        events = []
+        g = make_gate(base_config, fake_mic, fake_vad, emb, fake_wake, fake_runtime,
+                      on_event=lambda et, pl: events.append((et, pl)))
+        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
+        fake_runtime.run.assert_not_called()
+        assert g._state == "IDLE"
+        types = [et for et, _ in events]
+        assert "verify_refused" in types and "session_started" not in types
+        refused = next(pl for et, pl in events if et == "verify_refused")
+        assert refused["score"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_split_half_match_serves(
+            self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+            fake_runtime):
+        events = []
+        g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+                      fake_runtime, on_event=lambda et, pl: events.append((et, pl)))
+        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
+        fake_runtime.run.assert_called_once()
+        assert "session_started" in [et for et, _ in events]
+
+    def test_short_first_segment_skips_split_half(
+            self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+            fake_runtime):
+        drive_one_cycle(
+            make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+                      fake_runtime),
+            fake_wake, fake_vad, seg=make_segment(500.0))
+        assert fake_embedder.extract.call_count == 1    # full segment only
+        fake_runtime.run.assert_called_once()
+
+    def test_half_embed_failure_resets_to_idle(
+            self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+            fake_runtime):
+        calls = {"n": 0}
+
+        def _extract(audio):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise RuntimeError("half embed failed")
+            return np.ones(192, dtype=np.float32)
+
+        fake_embedder.extract = MagicMock(side_effect=_extract)
+        events = []
+        g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+                      fake_runtime, on_event=lambda et, pl: events.append((et, pl)))
+        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
+        fake_runtime.run.assert_not_called()
+        assert g._state == "IDLE"
+        # infra failure, not a verdict: no verify_refused event
+        assert "verify_refused" not in [et for et, _ in events]

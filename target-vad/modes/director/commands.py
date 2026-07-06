@@ -45,3 +45,11 @@ class SpeakNudge:
 @dataclass(frozen=True)
 class EndSession:
     reason: str
+
+
+@dataclass(frozen=True)
+class AccumulateSpeakerAudio:
+    """Feed the last-staged segment audio into the safety-net rolling buffer
+    (Director-09). Emitted ONLY for served/plausibly-owner speech. Carries no
+    audio — worker staging, same discipline as the Transcribe* commands."""
+    pass

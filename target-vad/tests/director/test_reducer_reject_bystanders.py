@@ -27,7 +27,7 @@ def _seg(rms=1.0, is_target=True, endpoint=0.9):
 def test_off_complete_target_accepts_even_if_quiet_and_absent():
     ctx = _ctx(reject=False, proximity_rms=0.9, presence=PresenceStatus.ABSENT)
     state, cmds = reduce(State.LISTENING, ctx, _seg(rms=0.0001, endpoint=0.9))
-    assert state is State.LISTENING and cmds == [C.TranscribeUserTurn()]
+    assert state is State.LISTENING and cmds == [C.AccumulateSpeakerAudio(), C.TranscribeUserTurn()]
     assert ctx.last_speech_at == 5.0          # reset (legacy)
 
 
@@ -41,7 +41,7 @@ def test_off_nontarget_no_transcribe_but_resets():
 def test_off_incomplete_accumulates_and_resets():
     ctx = _ctx(reject=False)
     state, cmds = reduce(State.LISTENING, ctx, _seg(endpoint=0.1))
-    assert cmds == []
+    assert cmds == [C.AccumulateSpeakerAudio()]
     assert ctx.last_speech_at == 5.0
 
 
@@ -64,14 +64,14 @@ def test_on_owner_absent_rejected_no_reset():
 def test_on_present_proximate_accepts_and_resets():
     ctx = _ctx(reject=True, proximity_rms=0.5, presence=PresenceStatus.PRESENT)
     state, cmds = reduce(State.LISTENING, ctx, _seg(rms=1.0, endpoint=0.9))
-    assert cmds == [C.TranscribeUserTurn()]
+    assert cmds == [C.AccumulateSpeakerAudio(), C.TranscribeUserTurn()]
     assert ctx.last_speech_at == 5.0
 
 
 def test_on_unavailable_proximate_accepts_failsafe():
     ctx = _ctx(reject=True, proximity_rms=0.5, presence=PresenceStatus.UNAVAILABLE)
     state, cmds = reduce(State.LISTENING, ctx, _seg(rms=1.0, endpoint=0.9))
-    assert cmds == [C.TranscribeUserTurn()]   # camera can't judge -> allow
+    assert cmds == [C.AccumulateSpeakerAudio(), C.TranscribeUserTurn()]   # camera can't judge -> allow
 
 
 def test_on_nontarget_rejected_no_reset():
@@ -84,7 +84,7 @@ def test_on_nontarget_rejected_no_reset():
 def test_on_incomplete_owner_accumulates_and_resets():
     ctx = _ctx(reject=True, proximity_rms=0.5, presence=PresenceStatus.PRESENT)
     state, cmds = reduce(State.LISTENING, ctx, _seg(rms=1.0, endpoint=0.1))
-    assert cmds == []                          # not complete yet
+    assert cmds == [C.AccumulateSpeakerAudio()]                          # not complete yet
     assert ctx.last_speech_at == 5.0           # but plausibly-owner -> reset
 
 

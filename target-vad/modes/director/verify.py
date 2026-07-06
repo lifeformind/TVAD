@@ -1,11 +1,10 @@
-"""Verify-before-serve gate (spec section 7).
+"""Verify-before-serve gate (Director-09 spec s5).
 
-Scores the finalized primary embedding against a holdout utterance embedding
-captured BEFORE finalize_enrollment deleted the per-utterance file
-(enrollment_store.holdout_utterance_embedding). Below threshold -> the Director
-refuses to start (return to IDLE, re-enroll). 0.80 matches the ~2% EER operating
-point on >=5s cumulative enrollment audio.
-"""
+Scores two embeddings against each other; the WakeGate calls it with the two
+HALVES of the first segment (same-utterance self-similarity — the only
+comparison where 0.80 is statistically honest on short audio). Below threshold
+-> refuse to serve (no session). Cross-utterance verification is the safety
+net's window-1 job."""
 
 import numpy as np
 

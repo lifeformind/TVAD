@@ -42,7 +42,7 @@ class IngestionWorker:
     def __init__(self, mic, vad, aec, turn_detector, embedder,
                  primary_embedding, stt_worker, playback, bus: EventBus,
                  cfg: DirectorConfig, proximity_rms: float, state_getter,
-                 score_fn, pvad=None):
+                 score_fn, pvad=None, safety_worker=None):
         self._mic = mic
         self._vad = vad
         self._aec = aec
@@ -57,6 +57,7 @@ class IngestionWorker:
         self._state_getter = state_getter
         self._score_fn = score_fn          # cosine(embedding, primary) -> float
         self._pvad = pvad                  # Plan 05 PvadWorker; None -> is_target=True
+        self._safety = safety_worker       # Director-09 SafetyNetWorker; None -> no staging
         self._chunk_frames = []            # most recent chunk's pVAD SpeakerFrames
         self._seg_frames = []              # pVAD frames over the current voiced run
         self._running = False
@@ -179,6 +180,15 @@ class IngestionWorker:
         self._seg_frames = []                            # consume the run
         if state is State.LISTENING:
             prob = await self._endpoint_prob(seg.audio)
+            if self._safety is not None:
+                # Overwrite-last staging (same discipline as the STT pending buffer):
+                # if two segments endpoint before the runtime drains the first event,
+                # the later segment's audio can be consumed by the earlier segment's
+                # AccumulateSpeakerAudio. Narrow window; the 1-of-3 smoother + 2s
+                # windows + the eject rms check absorb a single mis-staged segment.
+                # Structural fix (seq echo through event->command->worker) is a
+                # recorded fast-follow.
+                self._safety.set_pending_audio(seg.audio)
             self._stt.set_pending_user_audio(seg.audio)
             await self._bus.emit(E.SegmentEndpointed(
                 duration_ms=seg.duration_ms, rms=rms,
@@ -189,6 +199,8 @@ class IngestionWorker:
             # path) becomes the SafetyNet's job. No pVAD -> legacy ECAPA score.
             score = pvad_score if pvad_score is not None \
                 else await self._speaker_score(seg.audio)
+            if self._safety is not None:
+                self._safety.set_pending_audio(seg.audio)
             self._stt.set_pending_interjection_audio(seg.audio)
             await self._bus.emit(E.InterjectionSegment(
                 duration_ms=seg.duration_ms, rms=rms,
