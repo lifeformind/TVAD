@@ -21,3 +21,6 @@ class DirectorConfig:
     # never touch the silence timeout above; they only add an owner-absent end.
     owner_absent_grace_s: float = 3.0   # sustained ABSENT this long => free the kiosk
     active_talk_guard_s: float = 3.0    # never owner-absent-end within this of owner speech
+    # Bystander gate v1 (Director-08, spec 2026-06-25). Reject NON-owner new turns by
+    # proximity + camera presence. Default off => byte-for-byte today's reducer.
+    reject_bystanders: bool = False

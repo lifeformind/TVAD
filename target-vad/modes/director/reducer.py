@@ -3,6 +3,8 @@ synchronous transition function: the ONLY mutator of State/Context. No I/O, no
 await, no clock — 'now' arrives via Tick events. Workers (Plan 02) translate the
 returned Commands into effects."""
 
+import enum
+
 from modes.director.state import State
 from modes.director.context import Context
 from modes.director import events as E
@@ -94,13 +96,55 @@ def _enter_listening(ctx: Context) -> None:
     ctx.reply_done = False
 
 
-def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
-    ctx.last_speech_at = ctx.now                 # any user activity resets the clock
+class TurnVerdict(enum.Enum):
+    ACCEPT = "accept"                       # complete owner turn -> transcribe
+    ACCUMULATE = "accumulate"               # plausibly-owner, endpoint not yet met
+    REJECT_NOT_TARGET = "not_target"        # pVAD bystander
+    REJECT_TOO_QUIET = "too_quiet"          # below proximity floor (distant bystander)
+    REJECT_OWNER_ABSENT = "owner_absent_frame"  # owner not in camera frame
+
+
+def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
+    """Pure verdict for a LISTENING SegmentEndpointed. Single source of truth for the
+    reducer (decide) and the runtime (DIAG). reject_bystanders off -> legacy verdict."""
+    complete = ev.endpoint_prob >= ctx.cfg.endpoint_threshold
+    if not ctx.cfg.reject_bystanders:
+        if not ev.is_target:
+            return TurnVerdict.REJECT_NOT_TARGET
+        return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
     if not ev.is_target:
-        return State.LISTENING, []               # bystander: ignore
-    if ev.endpoint_prob < ctx.cfg.endpoint_threshold:
-        return State.LISTENING, []               # turn not complete: keep accumulating
-    return State.LISTENING, [C.TranscribeUserTurn()]
+        return TurnVerdict.REJECT_NOT_TARGET
+    if ev.rms < ctx.proximity_rms:
+        return TurnVerdict.REJECT_TOO_QUIET
+    if ctx.presence_status is PresenceStatus.ABSENT:
+        return TurnVerdict.REJECT_OWNER_ABSENT
+    return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
+
+
+def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
+    """DIAG-only: the reject reason for a new-turn segment, or None if accepted /
+    still accumulating. None for non-reject verdicts keeps the log quiet."""
+    v = classify_new_turn(ctx, ev)
+    if v in (TurnVerdict.REJECT_NOT_TARGET, TurnVerdict.REJECT_TOO_QUIET,
+             TurnVerdict.REJECT_OWNER_ABSENT):
+        return v.value
+    return None
+
+
+def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
+    v = classify_new_turn(ctx, ev)
+    if not ctx.cfg.reject_bystanders:
+        ctx.last_speech_at = ctx.now             # legacy: any voiced segment resets
+        if v is TurnVerdict.ACCEPT:
+            return State.LISTENING, [C.TranscribeUserTurn()]
+        return State.LISTENING, []
+    # reject-by-default: only plausibly-owner speech resets the silence/presence clock
+    if v in (TurnVerdict.ACCEPT, TurnVerdict.ACCUMULATE):
+        ctx.last_speech_at = ctx.now
+        if v is TurnVerdict.ACCEPT:
+            return State.LISTENING, [C.TranscribeUserTurn()]
+        return State.LISTENING, []
+    return State.LISTENING, []                    # rejected: no clock reset
 
 
 def _on_user_transcribed(ctx: Context, ev: E.UserTurnTranscribed) -> tuple:
