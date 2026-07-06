@@ -18,7 +18,12 @@ core:
     enrollment_max_retries: 3
 
   audio:
-    device_index: null
+    # Capture goes through PipeWire; the mic is whatever PipeWire's default
+    # source is — kept on the ReSpeaker 4 Mic Array (the production mic; the
+    # C10 is camera duty). PortAudio cannot open the array directly, so
+    # "pipewire" is the only path. Far-field array => proximity floors run
+    # ~0.01 (vs ~0.06 near-field C10); do not compare floors across mics.
+    device_index: "pipewire"
     channels: 1
     sample_rate: 16000
     chunk_size: 480
@@ -105,7 +110,11 @@ kiosk:
     # is ALSO below the proximity floor = silent EJECT (speaker_mismatch).
     turn_gate:
       require_speaker_match: true  # master enable (strict-bool; only real `true`)
-      speaker_threshold: 0.30      # tuned for >=2s windows (offline ~100%/100%)
+      speaker_threshold: 0.15      # live-tuned 2026-07-06 (was 0.30, offline-derived):
+                                   # owner 2s windows score 0.230-0.466 live (array mic,
+                                   # interjection windows carry TTS bleed); stranger scored
+                                   # 0.069. 0.30 sat inside the owner band -> two window-1
+                                   # false ejects. 0.15 = midpoint of the live gap.
       verify_window_ms: 2000       # accumulate served turn audio to this, then verify
       endpoint_threshold: 0.5      # Smart Turn endpoint_prob >= this => turn complete
       # Bystander gate v1 (Director-08): reject NON-owner NEW turns by proximity +
