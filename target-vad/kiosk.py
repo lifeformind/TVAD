@@ -71,17 +71,30 @@ def _assert_array_startup(config: dict, console: Console) -> None:
         correctness."""
     tb_cfg = config["kiosk"].get("talkback", {})
     spec = tb_cfg.get("output_device")
-    if spec is not None:
-        from modes.director.assembly import resolve_output_device
+    if isinstance(spec, str):
+        # String pin resolves against live PipeWire sinks (pw-dump) — the
+        # same resolution _open_output_stream repeats per session before
+        # setting PIPEWIRE_NODE. An unreadable PipeWire state is as fatal as
+        # a missing sink: routing that can't be VERIFIED can't be trusted
+        # (Bug A returns invisibly if TTS lands off the array).
+        from modes.director import assembly
+        try:
+            name = assembly.resolve_pipewire_sink(spec, assembly._pipewire_sinks())
+        except Exception as e:
+            console.print(f"[red]✗[/] {e}")
+            sys.exit(4)
+        console.print(f"[green]✓[/] TTS output pinned: {name}")
+    elif spec is not None:
+        # Raw PortAudio-index escape hatch: bounds-check it here so a typo
+        # fails at startup, not mid-session.
         import sounddevice as sd
         try:
             devices = sd.query_devices()
-            idx = resolve_output_device(spec, devices)
-            if idx < 0 or idx >= len(devices):
+            if spec < 0 or spec >= len(devices):
                 raise RuntimeError(
-                    f"output_device index {idx} out of range "
+                    f"output_device index {spec} out of range "
                     f"(0..{len(devices) - 1})")
-            name = devices[idx]["name"]
+            name = devices[spec]["name"]
         except (RuntimeError, IndexError) as e:
             console.print(f"[red]✗[/] {e}")
             sys.exit(4)

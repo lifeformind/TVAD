@@ -337,28 +337,45 @@ def build_director_runtime(
     return DirectorRuntimeFactory(runtime, bus, stt_worker, handoff.first_segment)
 
 
-def resolve_output_device(spec, devices):
-    """Resolve kiosk.talkback.output_device to a PortAudio device index.
+def _pipewire_sinks():
+    """Live PipeWire Audio/Sink nodes as [{'name', 'description'}], via
+    pw-dump. Raises on a missing/broken pw-dump — the caller decides whether
+    unverifiable routing is fatal (it is, wherever the array pin matters)."""
+    import json
+    import subprocess
 
-    None -> None (system default; legacy best-effort path). int -> passthrough
-    (today's escape hatch). str -> case-insensitive substring match over
-    OUTPUT-capable devices; no match -> RuntimeError. Fail loud is the point
+    out = subprocess.run(["pw-dump"], capture_output=True, text=True,
+                         timeout=5, check=True).stdout
+    sinks = []
+    for obj in json.loads(out):
+        props = ((obj.get("info") or {}).get("props") or {})
+        if props.get("media.class") == "Audio/Sink":
+            sinks.append({"name": props.get("node.name", ""),
+                          "description": props.get("node.description", "")})
+    return sinks
+
+
+def resolve_pipewire_sink(spec, sinks):
+    """Resolve kiosk.talkback.output_device (a name substring) to a PipeWire
+    sink node.name; no match -> RuntimeError. Fail loud is the point
     (Director-10): TTS must verifiably reach the array — its onboard AEC
-    cancels the kiosk's own voice (Bug A); silently landing on another device
-    would resurrect the bug invisibly. NB PortAudio's name for the array is
-    'ReSpeaker 4 Mic Array (UAC1.0): USB Audio', not the ALSA id ArrayUAC10.
-    """
-    if spec is None or isinstance(spec, int):
-        return spec
+    cancels the kiosk's own voice (Bug A); silently landing on another sink
+    would resurrect the bug invisibly. The resolved name is passed via
+    PIPEWIRE_NODE at stream open, which pins the stream to that sink
+    regardless of default-sink elections — but a PIPEWIRE_NODE naming a
+    NONEXISTENT node falls back to the default sink silently (measured
+    2026-07-06), so the guarantee lives here, in resolving against live
+    pw-dump state first."""
     needle = str(spec).lower()
-    for i, d in enumerate(devices):
-        if d.get("max_output_channels", 0) > 0 and needle in d.get("name", "").lower():
-            return i
+    for s in sinks:
+        if (needle in s.get("name", "").lower()
+                or needle in s.get("description", "").lower()):
+            return s["name"]
     raise RuntimeError(
-        f"output_device {spec!r} not found among PortAudio output devices. "
+        f"output_device {spec!r} matches no PipeWire audio sink. "
         f"Check the ReSpeaker's USB connection (lsusb should list 2886:0018) "
-        f"and the powered speaker on its 3.5mm jack, or set "
-        f"kiosk.talkback.output_device to null for the system default.")
+        f"and `wpctl status` sinks, or set kiosk.talkback.output_device to "
+        f"null for the system default.")
 
 
 def _open_output_stream(tb_cfg: dict):  # pragma: no cover - needs real audio device
@@ -366,8 +383,13 @@ def _open_output_stream(tb_cfg: dict):  # pragma: no cover - needs real audio de
     written + recorded as the AEC reference (controller.py:316-323).
 
     output_device set (Director-10 array pin): failures RAISE — never fall
-    back to another device. output_device null: legacy best-effort — system
-    default, None (no audible output) on any failure."""
+    back to another device. A string spec resolves to a PipeWire sink and
+    opens PortAudio's 'pipewire' device with PIPEWIRE_NODE set to the
+    resolved node: opening the array's ALSA device directly races PipeWire's
+    card reservation (EBUSY whenever the sink is active or within its
+    suspend-timeout — live finding 2026-07-06). An int spec stays the raw
+    PortAudio-index escape hatch. output_device null: legacy best-effort —
+    system default, None (no audible output) on any failure."""
     if os.environ.get("TVAD_NO_OUTPUT"):
         # Isolation switch: skip opening the OutputStream entirely. If the mic
         # then works (turns transcribed), opening the output stream was resetting
@@ -389,10 +411,26 @@ def _open_output_stream(tb_cfg: dict):  # pragma: no cover - needs real audio de
         except Exception:
             return None
     import sounddevice as sd
-    device = resolve_output_device(device_spec, sd.query_devices())
-    stream = sd.OutputStream(
-        samplerate=tb_cfg.get("sample_rate_hz", 16000), channels=1,
-        dtype="float32", device=device,
-    )
-    stream.start()
+    if isinstance(device_spec, int):
+        stream = sd.OutputStream(
+            samplerate=tb_cfg.get("sample_rate_hz", 16000), channels=1,
+            dtype="float32", device=device_spec,
+        )
+        stream.start()
+        return stream
+    node = resolve_pipewire_sink(device_spec, _pipewire_sinks())
+    os.environ["PIPEWIRE_NODE"] = node
+    try:
+        stream = sd.OutputStream(
+            samplerate=tb_cfg.get("sample_rate_hz", 16000), channels=1,
+            dtype="float32", device="pipewire",
+        )
+        stream.start()
+    finally:
+        # The pin is read at stream creation; scope it so no other stream
+        # (or a later legacy-null session) inherits it.
+        os.environ.pop("PIPEWIRE_NODE", None)
+    if _DIAG:
+        print(f"[DIAG assembly] OutputStream pinned to PipeWire sink {node}",
+              file=sys.stderr, flush=True)
     return stream

@@ -1,53 +1,73 @@
 # tests/director/test_output_device.py
-"""resolve_output_device (Director-10): pin TTS to the array, fail loud.
+"""TTS output pinning (Director-10): resolve the ReSpeaker's PipeWire sink,
+fail loud. Live validation 2026-07-06 found the original direct-ALSA open
+races PipeWire's card reservation (works only while the sink is suspended),
+so production pins via PIPEWIRE_NODE over the 'pipewire' PortAudio device —
+and because a bogus PIPEWIRE_NODE silently falls back to the default sink,
+the fail-loud guarantee lives HERE, in resolution against live pw-dump state.
 
-Pure-function tests over a fake sd.query_devices() table — no PortAudio."""
+Pure-function tests over canned pw-dump JSON — no PipeWire, no PortAudio."""
+
+import json
+from unittest.mock import MagicMock
 
 import pytest
 
-from modes.director.assembly import resolve_output_device
+from modes.director.assembly import _pipewire_sinks, resolve_pipewire_sink
 
-DEVICES = [
-    {"name": "NVIDIA: LG SDQHD (hw:0,3)", "max_output_channels": 2},
-    {"name": "ReSpeaker 4 Mic Array (UAC1.0): USB Audio (hw:2,0)",
-     "max_output_channels": 2},
-    {"name": "pipewire", "max_output_channels": 64},
+SINKS = [
+    {"name": "alsa_output.platform-NVDA2014_00.hdmi-stereo",
+     "description": "Built-in Audio Digital Stereo (HDMI)"},
+    {"name": "alsa_output.usb-SEEED_ReSpeaker_4_Mic_Array__UAC1.0_-00.iec958-stereo",
+     "description": "ReSpeaker 4 Mic Array (UAC1.0) Digital Stereo (IEC958)"},
 ]
 
 
-def test_none_passes_through():
-    assert resolve_output_device(None, DEVICES) is None
+def test_matches_description_substring_case_insensitive():
+    assert resolve_pipewire_sink("respeaker", SINKS) == SINKS[1]["name"]
 
 
-def test_int_passes_through():
-    assert resolve_output_device(5, DEVICES) == 5
+def test_matches_node_name_substring():
+    assert resolve_pipewire_sink("SEEED_ReSpeaker", SINKS) == SINKS[1]["name"]
 
 
-def test_substring_match_is_case_insensitive():
-    assert resolve_output_device("respeaker", DEVICES) == 1
-
-
-def test_input_only_device_with_matching_name_is_skipped():
-    devices = [
-        {"name": "ReSpeaker 4 Mic Array (capture only)", "max_output_channels": 0},
-        {"name": "ReSpeaker 4 Mic Array (UAC1.0): USB Audio", "max_output_channels": 2},
-    ]
-    assert resolve_output_device("ReSpeaker", devices) == 1
-
-
-def test_first_output_capable_match_wins():
-    devices = [
-        {"name": "ReSpeaker A", "max_output_channels": 2},
-        {"name": "ReSpeaker B", "max_output_channels": 2},
-    ]
-    assert resolve_output_device("ReSpeaker", devices) == 0
+def test_first_match_wins_deterministically():
+    assert resolve_pipewire_sink("alsa_output", SINKS) == SINKS[0]["name"]
 
 
 def test_no_match_raises_actionable_runtimeerror():
     with pytest.raises(RuntimeError) as exc:
-        resolve_output_device("ReSpeaker", DEVICES[:1])
+        resolve_pipewire_sink("ReSpeaker", SINKS[:1])
     assert "ReSpeaker" in str(exc.value)
     assert "output_device" in str(exc.value)
+
+
+PW_DUMP = json.dumps([
+    {"type": "PipeWire:Interface:Node",
+     "info": {"props": {"media.class": "Audio/Source",
+                        "node.name": "alsa_input.usb-SEEED_ReSpeaker...analog-surround-51.6",
+                        "node.description": "ReSpeaker 4 Mic Array (UAC1.0) Analog Surround 5.1"}}},
+    {"type": "PipeWire:Interface:Node",
+     "info": {"props": {"media.class": "Audio/Sink",
+                        "node.name": "alsa_output.usb-SEEED_ReSpeaker_4_Mic_Array__UAC1.0_-00.iec958-stereo",
+                        "node.description": "ReSpeaker 4 Mic Array (UAC1.0) Digital Stereo (IEC958)"}}},
+    {"type": "PipeWire:Interface:Device",
+     "info": {"props": {"media.class": "Audio/Device"}}},
+    {"type": "PipeWire:Interface:Node", "info": None},
+])
+
+
+def test_pipewire_sinks_filters_audio_sink_nodes(monkeypatch):
+    import subprocess
+
+    run = MagicMock(return_value=MagicMock(stdout=PW_DUMP))
+    monkeypatch.setattr(subprocess, "run", run)
+    sinks = _pipewire_sinks()
+    assert sinks == [{
+        "name": "alsa_output.usb-SEEED_ReSpeaker_4_Mic_Array__UAC1.0_-00.iec958-stereo",
+        "description": "ReSpeaker 4 Mic Array (UAC1.0) Digital Stereo (IEC958)",
+    }]
+    assert run.call_args[0][0][0] == "pw-dump"
 
 
 def test_build_aec_disabled_returns_none():

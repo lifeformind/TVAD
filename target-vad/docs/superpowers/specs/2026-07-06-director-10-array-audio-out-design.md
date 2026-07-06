@@ -71,16 +71,32 @@ null` (system default). Change:
   construction — the stream is on the array; there is no default-sink election
   to drift.
 
-**Spike RESOLVED (2026-07-06, pre-plan):** PortAudio opens the array's
-playback end directly — `sd.OutputStream(samplerate=16000, channels=1,
-dtype='float32', device=<ReSpeaker index>)` opened, streamed a 1s tone
-frame-by-frame, and closed cleanly (unlike capture, which needs
-`"pipewire"`). No PipeWire-sink fallback is needed; direct pin it is. The
-protocol registers were also verified the same day: AGCONOFF read live
-(= 1, AGC on — the startup assert is real work) and the write payload
-confirmed against Seeed's tuning.py (`struct.pack('<iii', offset, value, 1)`,
-ctrl_transfer OUT, wValue=0, wIndex=param_id). Invariant unchanged: **TTS
-verifiably reaches the array or the kiosk refuses to start.**
+**Mechanics REVISED during live validation (2026-07-06).** The pre-plan
+spike showed a direct PortAudio open of the array's playback end working —
+but only because the sink was idle: the first live kiosk run crashed with
+`Device unavailable (-9985)`, and instrumented reproduction confirmed
+PipeWire holds the array's ALSA playback PCM whenever its sink node is
+active (plus its suspend-timeout tail). With the array as default sink,
+the direct open is a race. Production mechanics are therefore:
+
+1. Resolve the config substring against **live PipeWire sinks** (`pw-dump`,
+   `media.class == Audio/Sink`, match on node.name or node.description) —
+   `resolve_pipewire_sink` raises the actionable RuntimeError on no match.
+2. Open PortAudio's `'pipewire'` device with **`PIPEWIRE_NODE`=<resolved
+   node.name>** scoped around the open — measured to hard-pin the stream's
+   links to that sink regardless of default-sink elections.
+3. The resolve step is what carries the fail-loud guarantee: a
+   `PIPEWIRE_NODE` naming a nonexistent node falls back to the default sink
+   *silently* (measured), so we only ever set it to a name pw-dump just
+   confirmed. An unreadable pw-dump is treated as fatal at startup
+   (unverifiable routing = untrusted routing). Int specs remain a raw
+   PortAudio-index escape hatch (bounds-checked at startup).
+
+Protocol registers verified the same day: AGCONOFF read live (= 1, AGC on —
+the startup assert is real work) and the write payload confirmed against
+Seeed's tuning.py (`struct.pack('<iii', offset, value, 1)`, ctrl_transfer
+OUT, wValue=0, wIndex=param_id). Invariant unchanged: **TTS verifiably
+reaches the array or the kiosk refuses to start.**
 
 ### 3.2 Array control module — `core/audio/respeaker.py`
 
@@ -126,7 +142,7 @@ a code change — hence the re-measure items in the merge gate.
 
 | Key | Change | Why |
 |---|---|---|
-| `kiosk.talkback.output_device` | `null` → `"ReSpeaker"` (+ comment) | pin TTS to the array (direct PortAudio open, spike-verified) |
+| `kiosk.talkback.output_device` | `null` → `"ReSpeaker"` (+ comment) | pin TTS to the array (PipeWire-sink resolve + PIPEWIRE_NODE; direct ALSA open races PipeWire's card reservation) |
 | `kiosk.talkback.aec.enabled` | `true` → `false` (+ comment) | hardware AEC does the job; flip true only if TTS leaves the array |
 | `kiosk.talkback.input_device` | **deleted** | never read by any code (config truth) |
 | `barge_in.speaker_threshold` | re-measured live | first-ever measurement with real echo cancellation |
@@ -137,7 +153,7 @@ a code change — hence the re-measure items in the merge gate.
 
 | Failure | Behavior |
 |---|---|
-| Array playback device absent at startup | Refuse to start; actionable RuntimeError |
+| Array sink absent from PipeWire at startup (or pw-dump unreadable) | Refuse to start (exit 4); actionable message |
 | USB control unreachable (udev/permissions) | Loud warning; kiosk continues (AGC stays on) |
 | Powered speaker unplugged from the jack | Undetectable in software (line-out has no sensing); documented operational check |
 | Mid-session USB device loss | Existing behavior: stream write fails, `_play_audio`'s `except` breaks the write loop; session ends via existing timeout machinery |

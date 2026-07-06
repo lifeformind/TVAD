@@ -46,11 +46,13 @@ kiosk:
     # XVF-3000's onboard AEC cancels the kiosk's own voice against its ch5
     # reference IN HARDWARE (kills Bug A: TTS bleed served / self-replies).
     # The powered speaker hangs off the array's 3.5mm jack. Name substring,
-    # resolved against PortAudio OUTPUT devices at startup; resolution
-    # failure refuses to start (exit 4) — never fall back silently, a
-    # routing drift would resurrect Bug A invisibly. NB PortAudio's device
-    # name does not contain the ALSA card id "ArrayUAC10". null = system
-    # default (legacy best-effort). (input_device key deleted: never read.)
+    # resolved against live PipeWire sinks (pw-dump) and pinned per stream
+    # via PIPEWIRE_NODE — NOT a direct ALSA open, which races PipeWire's
+    # card reservation (EBUSY while the sink is active; live 2026-07-06).
+    # Resolution failure refuses to start (exit 4) — never fall back
+    # silently, a routing drift would resurrect Bug A invisibly. null =
+    # system default (legacy best-effort); int = raw PortAudio index
+    # escape hatch. (input_device key deleted: never read.)
     output_device: "ReSpeaker"
 
     # Active-conversation timeouts, owned by the Director (the SOLE timeout

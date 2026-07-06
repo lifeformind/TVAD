@@ -97,11 +97,25 @@ def _cfg_with_output(output_device="ReSpeaker"):
     return cfg
 
 
+_ARRAY_SINKS = [
+    {"name": "alsa_output.platform-NVDA2014_00.hdmi-stereo",
+     "description": "Built-in Audio Digital Stereo (HDMI)"},
+    {"name": "alsa_output.usb-SEEED_ReSpeaker_4_Mic_Array__UAC1.0_-00.iec958-stereo",
+     "description": "ReSpeaker 4 Mic Array (UAC1.0) Digital Stereo (IEC958)"},
+]
+
+
 def test_startup_assert_happy_path_pins_output_and_kills_agc(monkeypatch):
+    # String pin resolves against PipeWire sinks (pw-dump), NOT PortAudio:
+    # sounddevice is poisoned to prove the string path never imports it
+    # (live 2026-07-06: the direct-ALSA open races PipeWire's card
+    # reservation; pinning now happens via PIPEWIRE_NODE at stream open).
     import sys as _sys
     import kiosk
 
-    monkeypatch.setitem(_sys.modules, "sounddevice", _FakeSd(_ARRAY_DEVICES))
+    monkeypatch.setitem(_sys.modules, "sounddevice", None)
+    monkeypatch.setattr("modes.director.assembly._pipewire_sinks",
+                        lambda: _ARRAY_SINKS)
     fake_dev = object()
     calls = []
     monkeypatch.setattr("core.audio.respeaker.find", lambda: fake_dev)
@@ -110,15 +124,32 @@ def test_startup_assert_happy_path_pins_output_and_kills_agc(monkeypatch):
     console = MagicMock()
     kiosk._assert_array_startup(_cfg_with_output(), console)
     assert calls == [(fake_dev, "AGCONOFF", 0)]
+    printed = " ".join(str(c) for c in console.print.call_args_list)
+    assert "SEEED_ReSpeaker" in printed          # the resolved node name is shown
 
 
 def test_startup_assert_missing_output_device_exits_4(monkeypatch):
-    import sys as _sys
     import pytest
     import kiosk
 
-    monkeypatch.setitem(_sys.modules, "sounddevice",
-                        _FakeSd([{"name": "NVIDIA: HDMI 1", "max_output_channels": 8}]))
+    monkeypatch.setattr("modes.director.assembly._pipewire_sinks",
+                        lambda: _ARRAY_SINKS[:1])        # no ReSpeaker sink
+    console = MagicMock()
+    with pytest.raises(SystemExit) as exc:
+        kiosk._assert_array_startup(_cfg_with_output(), console)
+    assert exc.value.code == 4
+
+
+def test_startup_assert_pwdump_failure_exits_4(monkeypatch):
+    # pw-dump absent/broken -> the pin cannot be VERIFIED -> refuse to start
+    # (unverifiable routing is the same hazard as wrong routing).
+    import pytest
+    import kiosk
+
+    def _boom():
+        raise OSError("pw-dump not found")
+
+    monkeypatch.setattr("modes.director.assembly._pipewire_sinks", _boom)
     console = MagicMock()
     with pytest.raises(SystemExit) as exc:
         kiosk._assert_array_startup(_cfg_with_output(), console)
