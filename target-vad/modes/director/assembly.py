@@ -185,6 +185,10 @@ def _calibrate_proximity_rms(first_segment, tb_cfg: dict) -> float:
             if audio is not None and len(audio) else 0.0
         )
         thr = primary_rms * prox.get("rms_factor", 0.5)
+        if _DIAG:
+            print(f"[DIAG assembly] proximity floor: seed_rms={primary_rms:.4f} "
+                  f"x factor={prox.get('rms_factor', 0.5)} = {thr:.4f}",
+                  file=sys.stderr, flush=True)
     return thr
 
 
