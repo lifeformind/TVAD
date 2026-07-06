@@ -74,3 +74,74 @@ def test_build_wakegate_attaches_runtime_and_emits_events_from_one_owner():
     assert "[IDLE]" in printed
     # No legacy double-handoff tag.
     assert "[HANDOFF]" not in printed
+
+
+class _FakeSd:
+    """Stand-in sounddevice module for _assert_array_startup."""
+    def __init__(self, devices):
+        self._devices = devices
+
+    def query_devices(self):
+        return self._devices
+
+
+_ARRAY_DEVICES = [
+    {"name": "NVIDIA: HDMI 1", "max_output_channels": 8},
+    {"name": "ReSpeaker 4 Mic Array (UAC1.0): USB Audio", "max_output_channels": 2},
+]
+
+
+def _cfg_with_output(output_device="ReSpeaker"):
+    cfg = _config()
+    cfg["kiosk"]["talkback"]["output_device"] = output_device
+    return cfg
+
+
+def test_startup_assert_happy_path_pins_output_and_kills_agc(monkeypatch):
+    import sys as _sys
+    import kiosk
+
+    monkeypatch.setitem(_sys.modules, "sounddevice", _FakeSd(_ARRAY_DEVICES))
+    fake_dev = object()
+    calls = []
+    monkeypatch.setattr("core.audio.respeaker.find", lambda: fake_dev)
+    monkeypatch.setattr("core.audio.respeaker.write_param",
+                        lambda dev, name, value: calls.append((dev, name, value)))
+    console = MagicMock()
+    kiosk._assert_array_startup(_cfg_with_output(), console)
+    assert calls == [(fake_dev, "AGCONOFF", 0)]
+
+
+def test_startup_assert_missing_output_device_exits_4(monkeypatch):
+    import sys as _sys
+    import pytest
+    import kiosk
+
+    monkeypatch.setitem(_sys.modules, "sounddevice",
+                        _FakeSd([{"name": "NVIDIA: HDMI 1", "max_output_channels": 8}]))
+    console = MagicMock()
+    with pytest.raises(SystemExit) as exc:
+        kiosk._assert_array_startup(_cfg_with_output(), console)
+    assert exc.value.code == 4
+
+
+def test_startup_assert_agc_failure_is_nonfatal(monkeypatch):
+    import sys as _sys
+    import kiosk
+
+    monkeypatch.setitem(_sys.modules, "sounddevice", _FakeSd(_ARRAY_DEVICES))
+    monkeypatch.setattr("core.audio.respeaker.find", lambda: None)  # array USB absent
+    console = MagicMock()
+    kiosk._assert_array_startup(_cfg_with_output(), console)        # must not raise
+    printed = " ".join(str(c) for c in console.print.call_args_list)
+    assert "AGC" in printed                                          # loud warning
+
+
+def test_startup_assert_null_output_device_skips_pin_check(monkeypatch):
+    import kiosk
+
+    # No sounddevice module injected: with output_device null the pin check
+    # must not even import it. AGC assert still runs (and here fails softly).
+    monkeypatch.setattr("core.audio.respeaker.find", lambda: None)
+    console = MagicMock()
+    kiosk._assert_array_startup(_cfg_with_output(output_device=None), console)

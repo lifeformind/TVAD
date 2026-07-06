@@ -61,6 +61,39 @@ def build_wakegate(
     )
 
 
+def _assert_array_startup(config: dict, console: Console) -> None:
+    """Director-10 startup asserts, run once before the wake loop.
+
+    (1) Pinned TTS output resolves -> exit(4) if not (fail loud: TTS off the
+        array means no hardware AEC and Bug A returns invisibly).
+    (2) ReSpeaker AGC off (AGCONOFF=0; volatile, reset on power cycle) ->
+        warn-only on failure: AGC-on degrades proximity-floor stability, not
+        correctness."""
+    tb_cfg = config["kiosk"].get("talkback", {})
+    spec = tb_cfg.get("output_device")
+    if spec is not None:
+        from modes.director.assembly import resolve_output_device
+        import sounddevice as sd
+        try:
+            idx = resolve_output_device(spec, sd.query_devices())
+        except RuntimeError as e:
+            console.print(f"[red]✗[/] {e}")
+            sys.exit(4)
+        name = sd.query_devices()[idx]["name"] if isinstance(idx, int) else str(idx)
+        console.print(f"[green]✓[/] TTS output pinned: {name}")
+    try:
+        from core.audio import respeaker
+        dev = respeaker.find()
+        if dev is None:
+            raise RuntimeError("ReSpeaker not found on USB (2886:0018)")
+        respeaker.write_param(dev, "AGCONOFF", 0)
+        console.print("[green]✓[/] ReSpeaker AGC off")
+    except Exception as e:
+        console.print(
+            f"[yellow]![/] ReSpeaker AGC assert failed ({e}); "
+            "continuing with AGC on — proximity floors will be less stable")
+
+
 class _LazyDirectorRuntime:
     """The object the WakeGate calls as runtime.run(handoff).
 
@@ -177,6 +210,7 @@ def main():
         sys.exit(2)
 
     runtime = _build_runtime(config)
+    _assert_array_startup(config, console)
     console.print(
         f"[bold][TALKBACK][/] Listening for "
         f"[bold cyan]\"{config['kiosk']['wake_phrase']}\"[/]..."
