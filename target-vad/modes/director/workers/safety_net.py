@@ -6,7 +6,11 @@ fills, embeds it OFF the event loop (run_in_executor, ECAPA ~108ms p95) and
 emits SpeakerWindowVerdict. No decisions here — the reducer owns the ladder.
 An empty pending buffer is a no-op: the assembly factory's seeded first segment
 (the enrollment utterance) is deliberately never staged, so window 1 is real
-post-enrollment speech (spec s3.2 seed exclusion)."""
+post-enrollment speech (spec s3.2 seed exclusion). Staging is seq-matched: the
+command's seq (echoed from the segment event) must equal the staged seq, so a
+stale command can never consume a LATER segment's audio — in particular a
+D08-rejected bystander segment (staged but never commanded) can't be pulled
+into the hijack buffer by an earlier accepted segment's command."""
 
 import asyncio
 
@@ -21,16 +25,18 @@ class SafetyNetWorker:
         self._bus = bus
         self._pending = None
 
-    def set_pending_audio(self, audio) -> None:
-        self._pending = audio
+    def set_pending_audio(self, audio, seq: int = 0) -> None:
+        self._pending = (seq, audio)
 
     async def execute(self, command) -> None:
         if not isinstance(command, C.AccumulateSpeakerAudio):
             return
-        audio, self._pending = self._pending, None
+        if self._pending is None or self._pending[0] != command.seq:
+            return                    # stale command; staged audio waits for ITS command
+        (_, audio), self._pending = self._pending, None
         if audio is None or len(audio) == 0:
             return
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         verdicts = await loop.run_in_executor(None, self._drain, audio)
         for v in verdicts:
             await self._bus.emit(E.SpeakerWindowVerdict(

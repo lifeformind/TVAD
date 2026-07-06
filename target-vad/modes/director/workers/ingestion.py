@@ -62,6 +62,7 @@ class IngestionWorker:
         self._seg_frames = []              # pVAD frames over the current voiced run
         self._running = False
         self._ducked_onset = False         # one onset per speech run (controller.py:842)
+        self._seq = 0                      # staging sequence; seed segment owns 0
 
     def stop(self) -> None:
         self._running = False
@@ -178,21 +179,20 @@ class IngestionWorker:
         rms = _rms(seg.audio)
         is_target, pvad_score = self._target_from(self._seg_frames)
         self._seg_frames = []                            # consume the run
+        # One seq per staged segment, stamped on both the staging slots and the
+        # event; the reducer echoes it into the consuming commands, so if a
+        # later segment overwrites a slot before the earlier command dispatches,
+        # the stale command no-ops instead of consuming the wrong audio.
+        self._seq += 1
+        seq = self._seq
         if state is State.LISTENING:
             prob = await self._endpoint_prob(seg.audio)
             if self._safety is not None:
-                # Overwrite-last staging (same discipline as the STT pending buffer):
-                # if two segments endpoint before the runtime drains the first event,
-                # the later segment's audio can be consumed by the earlier segment's
-                # AccumulateSpeakerAudio. Narrow window; the 1-of-3 smoother + 2s
-                # windows + the eject rms check absorb a single mis-staged segment.
-                # Structural fix (seq echo through event->command->worker) is a
-                # recorded fast-follow.
-                self._safety.set_pending_audio(seg.audio)
-            self._stt.set_pending_user_audio(seg.audio)
+                self._safety.set_pending_audio(seg.audio, seq)
+            self._stt.set_pending_user_audio(seg.audio, seq)
             await self._bus.emit(E.SegmentEndpointed(
                 duration_ms=seg.duration_ms, rms=rms,
-                is_target=is_target, endpoint_prob=prob,
+                is_target=is_target, endpoint_prob=prob, seq=seq,
             ))
         elif state is State.EVALUATING:
             # pVAD confidence is the primary speaker_score; ECAPA (off the hot
@@ -200,16 +200,16 @@ class IngestionWorker:
             score = pvad_score if pvad_score is not None \
                 else await self._speaker_score(seg.audio)
             if self._safety is not None:
-                self._safety.set_pending_audio(seg.audio)
-            self._stt.set_pending_interjection_audio(seg.audio)
+                self._safety.set_pending_audio(seg.audio, seq)
+            self._stt.set_pending_interjection_audio(seg.audio, seq)
             await self._bus.emit(E.InterjectionSegment(
                 duration_ms=seg.duration_ms, rms=rms,
-                is_target=is_target, speaker_score=score,
+                is_target=is_target, speaker_score=score, seq=seq,
             ))
         # SPEAKING/THINKING/IDLE: onset handled separately; segments are ignored.
 
     async def _endpoint_prob(self, audio: np.ndarray) -> float:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return float(await loop.run_in_executor(
             None, self._turn.endpoint_prob, audio, 16000))
 
@@ -217,6 +217,6 @@ class IngestionWorker:
         """ECAPA speaker_score off the synchronous path (Plan 05 swaps for pVAD)."""
         if self._embedder is None or self._primary is None:
             return 1.0
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         embedding = await loop.run_in_executor(None, self._embedder.extract, audio)
         return float(self._score_fn(embedding, self._primary))

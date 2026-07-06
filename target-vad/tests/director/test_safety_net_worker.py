@@ -78,3 +78,17 @@ async def test_non_accumulate_commands_are_ignored():
     worker.set_pending_audio(np.full(1600, 0.5, dtype=np.float32))
     await worker.execute(C.TranscribeUserTurn())
     assert await _events(bus) == []
+
+
+@pytest.mark.asyncio
+async def test_seq_mismatch_leaves_staged_audio_for_its_own_command():
+    # Overwrite-last staging race: if segment B overwrites the slot before
+    # segment A's command dispatches, A's command must NOT consume B's audio
+    # (a D08-rejected bystander segment could poison the hijack buffer that
+    # way). Stale command == no-op; the staged pair waits for ITS command.
+    worker, bus = _worker(verify_window_ms=100)
+    worker.set_pending_audio(np.full(1600, 0.5, dtype=np.float32), seq=2)
+    await worker.execute(C.AccumulateSpeakerAudio(seq=1))     # stale command
+    assert await _events(bus) == []                           # nothing consumed
+    await worker.execute(C.AccumulateSpeakerAudio(seq=2))     # the matching one
+    assert len(await _events(bus)) == 1

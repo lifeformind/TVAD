@@ -29,12 +29,12 @@ class StartGeneration:
 
 @dataclass(frozen=True)
 class TranscribeUserTurn:
-    pass
+    seq: int = 0                     # staged-audio sequence (events.SegmentEndpointed)
 
 
 @dataclass(frozen=True)
 class TranscribeInterjection:
-    pass
+    seq: int = 0
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,9 @@ class EndSession:
 
 @dataclass(frozen=True)
 class AccumulateSpeakerAudio:
-    """Feed the last-staged segment audio into the safety-net rolling buffer
+    """Feed the staged segment audio into the safety-net rolling buffer
     (Director-09). Emitted ONLY for served/plausibly-owner speech. Carries no
-    audio — worker staging, same discipline as the Transcribe* commands."""
-    pass
+    audio — worker staging, same discipline as the Transcribe* commands; seq
+    (echoed from the segment event) tells the worker WHICH staged audio is
+    this command's, so a stale command can't consume a later segment's."""
+    seq: int = 0

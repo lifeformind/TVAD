@@ -22,6 +22,11 @@ class SegmentEndpointed:
     rms: float
     is_target: bool                  # pVAD/ECAPA verdict (Plan 05 fills it; True for now)
     endpoint_prob: float             # Smart Turn endpoint probability
+    # Staging sequence: ingestion stamps the same seq on this event and on the
+    # audio it stages into the STT/safety workers; the reducer echoes it into
+    # the consuming commands so a command can never grab a LATER segment's
+    # staged audio (overwrite-last race). 0 = the assembly-seeded first segment.
+    seq: int = 0
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,7 @@ class InterjectionSegment:
     rms: float
     is_target: bool
     speaker_score: float             # ECAPA/pVAD score vs primary (off hot path)
+    seq: int = 0                     # staging sequence (see SegmentEndpointed)
 
 
 @dataclass(frozen=True)

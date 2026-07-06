@@ -244,3 +244,35 @@ async def test_evaluating_segment_staged_into_safety_worker():
                               State.EVALUATING, safety=safety)
     await _run_briefly(w)
     safety.set_pending_audio.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_listening_segments_stage_with_matching_monotonic_seq():
+    # Each segment gets a fresh seq (from 1 — the assembly seed owns 0), and
+    # the SAME seq goes to the event and both staging slots, so the reducer's
+    # echoed commands can match staged audio to their segment.
+    seg1, seg2 = _seg(), _seg()
+    safety = MagicMock()
+    w, bus, stt = make_worker(FakeMic([seg1.audio, seg2.audio]),
+                              FakeVad([[seg1], [seg2]]),
+                              State.LISTENING, safety=safety)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
+    assert [e.seq for e in seps] == [1, 2]
+    assert [c.args[1] for c in safety.set_pending_audio.call_args_list] == [1, 2]
+    assert [c.args[1] for c in stt.set_pending_user_audio.call_args_list] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_interjection_seq_matches_staging():
+    seg = _seg()
+    safety = MagicMock()
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]]),
+                              State.EVALUATING, safety=safety)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    inter = [e for e in evs if isinstance(e, E.InterjectionSegment)]
+    assert len(inter) == 1 and inter[0].seq == 1
+    assert safety.set_pending_audio.call_args[0][1] == 1
+    assert stt.set_pending_interjection_audio.call_args[0][1] == 1

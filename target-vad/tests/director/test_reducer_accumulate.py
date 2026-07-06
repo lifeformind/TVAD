@@ -18,9 +18,10 @@ def _ctx(reject=True, proximity_rms=0.5, presence=PresenceStatus.PRESENT):
     return ctx
 
 
-def _seg(rms=1.0, is_target=True, endpoint=0.9):
+def _seg(rms=1.0, is_target=True, endpoint=0.9, seq=0):
     return E.SegmentEndpointed(duration_ms=500.0, rms=rms,
-                               is_target=is_target, endpoint_prob=endpoint)
+                               is_target=is_target, endpoint_prob=endpoint,
+                               seq=seq)
 
 
 def test_accept_emits_accumulate_then_transcribe():
@@ -70,3 +71,24 @@ def test_rejected_interjection_restores_without_accumulate():
                                is_target=True, speaker_score=0.9)
     state, cmds = reduce(State.EVALUATING, ctx, ev)
     assert cmds == [C.Restore()]
+
+
+def test_accepted_segment_seq_echoes_into_commands():
+    # The reducer echoes the event's staging seq into the commands so the
+    # workers consume exactly THIS segment's staged audio (overwrite-last fix).
+    state, cmds = reduce(State.LISTENING, _ctx(), _seg(endpoint=0.9, seq=7))
+    assert cmds == [C.AccumulateSpeakerAudio(seq=7), C.TranscribeUserTurn(seq=7)]
+
+
+def test_accumulated_segment_seq_echoes_into_command():
+    state, cmds = reduce(State.LISTENING, _ctx(), _seg(endpoint=0.1, seq=3))
+    assert cmds == [C.AccumulateSpeakerAudio(seq=3)]
+
+
+def test_interjection_seq_echoes_into_commands():
+    ctx = _ctx()
+    ctx.ducked = True
+    ev = E.InterjectionSegment(duration_ms=500.0, rms=1.0,
+                               is_target=True, speaker_score=0.9, seq=9)
+    state, cmds = reduce(State.EVALUATING, ctx, ev)
+    assert cmds == [C.AccumulateSpeakerAudio(seq=9), C.TranscribeInterjection(seq=9)]
