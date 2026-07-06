@@ -26,13 +26,17 @@ def _diag(msg: str) -> None:
 
 
 def _event_text(event) -> str:
-    """Surface the human-readable text an event carries, so a live run shows what
-    the ASR heard and what the TTS is about to say (else the log proves the FSM
-    works but not that the words were caught right)."""
+    """Surface the human-readable payload an event carries, so a live run shows
+    what the ASR heard, what the TTS is about to say, and which way presence
+    flipped (2026-07-06: two false owner_absent session ends were undiagnosable
+    because OwnerPresenceEvent printed without its status)."""
     for attr in ("text", "assistant_text"):
         val = getattr(event, attr, None)
         if val:
             return f" text={val!r}"
+    status = getattr(event, "status", None)
+    if status is not None:
+        return f" status={status.name}"
     return ""
 
 
