@@ -208,7 +208,7 @@ class WakeGate:
         # utterance verification (too noisy on short audio) is window 1's job.
         # Only for segments >= 1.0s: halves off the 300ms VAD floor are too
         # short to compare honestly and would false-refuse real users.
-        sr = 16000
+        sr = int(self.config["core"]["audio"]["sample_rate"])
         if len(segment.audio) >= sr:
             thr = self._talkback_config.get("verify_before_serve_threshold", 0.80)
             half = len(segment.audio) // 2

@@ -84,7 +84,7 @@ class PlaybackWorker:
         await does not stop the executor thread (run_in_executor jobs can't be
         cancelled once running), so the reference must survive for drain()."""
         self._play_gen = gen_id
-        self._play_future = asyncio.get_event_loop().run_in_executor(
+        self._play_future = asyncio.get_running_loop().run_in_executor(
             None, self._play_audio, audio, gen_id
         )
         await self._play_future

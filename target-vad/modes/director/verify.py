@@ -9,11 +9,11 @@ net's window-1 job."""
 import numpy as np
 
 
-def verify_before_serve(primary: np.ndarray, holdout: np.ndarray,
+def verify_before_serve(half_a: np.ndarray, half_b: np.ndarray,
                         threshold: float = 0.80) -> tuple:
     """Return (ok, score). ok == score >= threshold."""
-    a = np.asarray(primary, dtype=np.float32)
-    b = np.asarray(holdout, dtype=np.float32)
+    a = np.asarray(half_a, dtype=np.float32)
+    b = np.asarray(half_b, dtype=np.float32)
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
     score = 0.0 if (na == 0 or nb == 0) else float(np.dot(a, b) / (na * nb))
     return (score >= threshold, score)

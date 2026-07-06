@@ -209,7 +209,7 @@ class IngestionWorker:
         # SPEAKING/THINKING/IDLE: onset handled separately; segments are ignored.
 
     async def _endpoint_prob(self, audio: np.ndarray) -> float:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return float(await loop.run_in_executor(
             None, self._turn.endpoint_prob, audio, 16000))
 
@@ -217,6 +217,6 @@ class IngestionWorker:
         """ECAPA speaker_score off the synchronous path (Plan 05 swaps for pVAD)."""
         if self._embedder is None or self._primary is None:
             return 1.0
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         embedding = await loop.run_in_executor(None, self._embedder.extract, audio)
         return float(self._score_fn(embedding, self._primary))
