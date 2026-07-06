@@ -77,6 +77,10 @@ def _assert_array_startup(config: dict, console: Console) -> None:
         try:
             devices = sd.query_devices()
             idx = resolve_output_device(spec, devices)
+            if idx < 0 or idx >= len(devices):
+                raise RuntimeError(
+                    f"output_device index {idx} out of range "
+                    f"(0..{len(devices) - 1})")
             name = devices[idx]["name"]
         except (RuntimeError, IndexError) as e:
             console.print(f"[red]✗[/] {e}")

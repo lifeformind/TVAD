@@ -137,6 +137,20 @@ def test_startup_assert_out_of_range_int_device_exits_4(monkeypatch):
     assert exc.value.code == 4
 
 
+def test_startup_assert_negative_int_device_exits_4(monkeypatch):
+    # Python negative indexing must not wrap to a real device and print a
+    # false "pinned" checkmark.
+    import sys as _sys
+    import pytest
+    import kiosk
+
+    monkeypatch.setitem(_sys.modules, "sounddevice", _FakeSd(_ARRAY_DEVICES))
+    console = MagicMock()
+    with pytest.raises(SystemExit) as exc:
+        kiosk._assert_array_startup(_cfg_with_output(output_device=-1), console)
+    assert exc.value.code == 4
+
+
 def test_startup_assert_agc_failure_is_nonfatal(monkeypatch):
     import sys as _sys
     import kiosk
