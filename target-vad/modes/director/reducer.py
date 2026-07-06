@@ -184,9 +184,9 @@ def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
         # net (Director-09) — only served speech reaches the hijack buffer, so
         # D08-rejected bystander chatter can never eject the owner (spec s3.2).
         ctx.last_speech_at = ctx.now
-        cmds = [C.AccumulateSpeakerAudio()]
+        cmds = [C.AccumulateSpeakerAudio(seq=ev.seq)]
         if v is TurnVerdict.ACCEPT:
-            cmds.append(C.TranscribeUserTurn())
+            cmds.append(C.TranscribeUserTurn(seq=ev.seq))
         return State.LISTENING, cmds
     # Rejected. Legacy mode (reject_bystanders off) keeps its historical clock
     # reset on ANY voiced segment; reject-by-default does not.
@@ -231,7 +231,8 @@ def _on_interjection_segment(ctx: Context, ev: E.InterjectionSegment) -> tuple:
         return _restore_speaking(ctx)
     if ev.speaker_score < ctx.cfg.speaker_threshold:     # not the primary speaker
         return _restore_speaking(ctx)
-    return State.EVALUATING, [C.AccumulateSpeakerAudio(), C.TranscribeInterjection()]
+    return State.EVALUATING, [C.AccumulateSpeakerAudio(seq=ev.seq),
+                              C.TranscribeInterjection(seq=ev.seq)]
 
 
 def _on_interjection_transcribed(ctx: Context, ev: E.InterjectionTranscribed) -> tuple:
