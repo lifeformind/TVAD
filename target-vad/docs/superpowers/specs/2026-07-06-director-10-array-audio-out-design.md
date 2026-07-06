@@ -57,11 +57,13 @@ Non-goals:
 `sd.OutputStream(device=tb_cfg.get("output_device"))` with `output_device:
 null` (system default). Change:
 
-- `kiosk.talkback.output_device: "ArrayUAC10"` — a name substring, resolved at
+- `kiosk.talkback.output_device: "ReSpeaker"` — a name substring, resolved at
   startup by a small helper: case-insensitive substring match over
   `sd.query_devices()`, output-capable devices only (`max_output_channels >
   0`), first match wins (deterministic). Integer values pass through unchanged
-  (today's escape hatch stays).
+  (today's escape hatch stays). NB the PortAudio device name is
+  `'ReSpeaker 4 Mic Array (UAC1.0): USB Audio'` — it does NOT contain the ALSA
+  card ID `ArrayUAC10`, hence `"ReSpeaker"` as the pin value.
 - Resolution failure raises `RuntimeError` with an actionable message
   ("ReSpeaker playback device not found — check USB connection / lsusb for
   2886:0018") **before any session starts**.
@@ -69,14 +71,15 @@ null` (system default). Change:
   construction — the stream is on the array; there is no default-sink election
   to drift.
 
-**Spike-first unknown:** PortAudio could not open the array for *capture*
-(that's why `core.audio.device_index` is `"pipewire"`). Whether it can open
-the array's *playback* end directly is untested. Plan task 1 is a ~10-minute
-spike: play a tone via `sd.OutputStream(device=<ArrayUAC10 index>)`. If direct
-open fails, the fallback design keeps the same invariant with different
-mechanics: `output_device: "pipewire"` + a startup assertion (via `wpctl`)
-that the current PipeWire default sink is the array, failing loud with the
-exact `wpctl set-default <id>` fix in the message. Either way: **TTS
+**Spike RESOLVED (2026-07-06, pre-plan):** PortAudio opens the array's
+playback end directly — `sd.OutputStream(samplerate=16000, channels=1,
+dtype='float32', device=<ReSpeaker index>)` opened, streamed a 1s tone
+frame-by-frame, and closed cleanly (unlike capture, which needs
+`"pipewire"`). No PipeWire-sink fallback is needed; direct pin it is. The
+protocol registers were also verified the same day: AGCONOFF read live
+(= 1, AGC on — the startup assert is real work) and the write payload
+confirmed against Seeed's tuning.py (`struct.pack('<iii', offset, value, 1)`,
+ctrl_transfer OUT, wValue=0, wIndex=param_id). Invariant unchanged: **TTS
 verifiably reaches the array or the kiosk refuses to start.**
 
 ### 3.2 Array control module — `core/audio/respeaker.py`
@@ -123,7 +126,7 @@ a code change — hence the re-measure items in the merge gate.
 
 | Key | Change | Why |
 |---|---|---|
-| `kiosk.talkback.output_device` | `null` → `"ArrayUAC10"` (+ comment) | pin TTS to the array (spike may revise to `"pipewire"` + sink assert, same invariant) |
+| `kiosk.talkback.output_device` | `null` → `"ReSpeaker"` (+ comment) | pin TTS to the array (direct PortAudio open, spike-verified) |
 | `kiosk.talkback.aec.enabled` | `true` → `false` (+ comment) | hardware AEC does the job; flip true only if TTS leaves the array |
 | `kiosk.talkback.input_device` | **deleted** | never read by any code (config truth) |
 | `barge_in.speaker_threshold` | re-measured live | first-ever measurement with real echo cancellation |
@@ -169,8 +172,8 @@ in a verdict note `docs/notes/YYYY-MM-DD-director-10-live.md`.
 
 ## 8. Risks
 
-- **PortAudio may not open the array playback directly** — spiked first;
-  fallback mechanics designed (§3.1), same fail-loud invariant.
+- ~~PortAudio may not open the array playback directly~~ — **RESOLVED**: spike
+  ran 2026-07-06, direct mono 16 kHz open works (§3.1).
 - **Hardware AEC quality unknown under duck/barge conditions** — if residual
   echo still passes the interjection gate, the software AEC can be re-enabled
   on top (config flip) and measured; worst case Bug A mitigation stays at
