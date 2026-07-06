@@ -75,11 +75,12 @@ def _assert_array_startup(config: dict, console: Console) -> None:
         from modes.director.assembly import resolve_output_device
         import sounddevice as sd
         try:
-            idx = resolve_output_device(spec, sd.query_devices())
-        except RuntimeError as e:
+            devices = sd.query_devices()
+            idx = resolve_output_device(spec, devices)
+            name = devices[idx]["name"]
+        except (RuntimeError, IndexError) as e:
             console.print(f"[red]✗[/] {e}")
             sys.exit(4)
-        name = sd.query_devices()[idx]["name"] if isinstance(idx, int) else str(idx)
         console.print(f"[green]✓[/] TTS output pinned: {name}")
     try:
         from core.audio import respeaker

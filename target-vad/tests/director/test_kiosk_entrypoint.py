@@ -125,6 +125,18 @@ def test_startup_assert_missing_output_device_exits_4(monkeypatch):
     assert exc.value.code == 4
 
 
+def test_startup_assert_out_of_range_int_device_exits_4(monkeypatch):
+    import sys as _sys
+    import pytest
+    import kiosk
+
+    monkeypatch.setitem(_sys.modules, "sounddevice", _FakeSd(_ARRAY_DEVICES))
+    console = MagicMock()
+    with pytest.raises(SystemExit) as exc:
+        kiosk._assert_array_startup(_cfg_with_output(output_device=99), console)
+    assert exc.value.code == 4
+
+
 def test_startup_assert_agc_failure_is_nonfatal(monkeypatch):
     import sys as _sys
     import kiosk
@@ -138,10 +150,15 @@ def test_startup_assert_agc_failure_is_nonfatal(monkeypatch):
 
 
 def test_startup_assert_null_output_device_skips_pin_check(monkeypatch):
+    import sys as _sys
     import kiosk
 
-    # No sounddevice module injected: with output_device null the pin check
-    # must not even import it. AGC assert still runs (and here fails softly).
+    # sys.modules["sounddevice"] = None makes ANY `import sounddevice`
+    # raise ImportError — structurally proving the null-output_device path
+    # never touches it (on the real kiosk the package imports fine, so a
+    # regression would otherwise pass silently). AGC assert still runs and
+    # here fails softly (array absent).
+    monkeypatch.setitem(_sys.modules, "sounddevice", None)
     monkeypatch.setattr("core.audio.respeaker.find", lambda: None)
     console = MagicMock()
     kiosk._assert_array_startup(_cfg_with_output(output_device=None), console)
