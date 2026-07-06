@@ -42,8 +42,16 @@ kiosk:
   talkback:
     sample_rate_hz: 16000
     frame_ms: 10
-    output_device: null
-    input_device: null
+    # Director-10: TTS plays through the ReSpeaker's playback path so the
+    # XVF-3000's onboard AEC cancels the kiosk's own voice against its ch5
+    # reference IN HARDWARE (kills Bug A: TTS bleed served / self-replies).
+    # The powered speaker hangs off the array's 3.5mm jack. Name substring,
+    # resolved against PortAudio OUTPUT devices at startup; resolution
+    # failure refuses to start (exit 4) — never fall back silently, a
+    # routing drift would resurrect Bug A invisibly. NB PortAudio's device
+    # name does not contain the ALSA card id "ArrayUAC10". null = system
+    # default (legacy best-effort). (input_device key deleted: never read.)
+    output_device: "ReSpeaker"
 
     # Active-conversation timeouts, owned by the Director (the SOLE timeout
     # authority — spec section 4a). silence_timeout_s: how long a pause between
@@ -68,7 +76,11 @@ kiosk:
     lockout_idle_after_s: 5
 
     aec:
-      enabled: true
+      # Director-10: OFF — TTS plays through the array, whose onboard AEC
+      # cancels it in hardware before ch0 reaches our capture path. The
+      # software-AEC code path is kept intact and dormant; flip true only
+      # if TTS ever plays through a non-array output again.
+      enabled: false
 
     stt:
       # Re-backed off faster-whisper (no aarch64 CUDA wheel on GB10) onto
