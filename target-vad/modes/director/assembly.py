@@ -337,10 +337,37 @@ def build_director_runtime(
     return DirectorRuntimeFactory(runtime, bus, stt_worker, handoff.first_segment)
 
 
+def resolve_output_device(spec, devices):
+    """Resolve kiosk.talkback.output_device to a PortAudio device index.
+
+    None -> None (system default; legacy best-effort path). int -> passthrough
+    (today's escape hatch). str -> case-insensitive substring match over
+    OUTPUT-capable devices; no match -> RuntimeError. Fail loud is the point
+    (Director-10): TTS must verifiably reach the array — its onboard AEC
+    cancels the kiosk's own voice (Bug A); silently landing on another device
+    would resurrect the bug invisibly. NB PortAudio's name for the array is
+    'ReSpeaker 4 Mic Array (UAC1.0): USB Audio', not the ALSA id ArrayUAC10.
+    """
+    if spec is None or isinstance(spec, int):
+        return spec
+    needle = str(spec).lower()
+    for i, d in enumerate(devices):
+        if d.get("max_output_channels", 0) > 0 and needle in d.get("name", "").lower():
+            return i
+    raise RuntimeError(
+        f"output_device {spec!r} not found among PortAudio output devices. "
+        f"Check the ReSpeaker's USB connection (lsusb should list 2886:0018) "
+        f"and the powered speaker on its 3.5mm jack, or set "
+        f"kiosk.talkback.output_device to null for the system default.")
+
+
 def _open_output_stream(tb_cfg: dict):  # pragma: no cover - needs real audio device
     """Open a persistent sounddevice OutputStream so playback frames can be
-    written + recorded as the AEC reference (controller.py:316-323). Returns None
-    if no device is available (degraded: no audible output, still runs)."""
+    written + recorded as the AEC reference (controller.py:316-323).
+
+    output_device set (Director-10 array pin): failures RAISE — never fall
+    back to another device. output_device null: legacy best-effort — system
+    default, None (no audible output) on any failure."""
     if os.environ.get("TVAD_NO_OUTPUT"):
         # Isolation switch: skip opening the OutputStream entirely. If the mic
         # then works (turns transcribed), opening the output stream was resetting
@@ -349,13 +376,23 @@ def _open_output_stream(tb_cfg: dict):  # pragma: no cover - needs real audio de
             print("[DIAG assembly] TVAD_NO_OUTPUT set: NOT opening OutputStream",
                   file=sys.stderr, flush=True)
         return None
-    try:
-        import sounddevice as sd
-        stream = sd.OutputStream(
-            samplerate=tb_cfg.get("sample_rate_hz", 16000), channels=1,
-            dtype="float32", device=tb_cfg.get("output_device"),
-        )
-        stream.start()
-        return stream
-    except Exception:
-        return None
+    device_spec = tb_cfg.get("output_device")
+    if device_spec is None:
+        try:
+            import sounddevice as sd
+            stream = sd.OutputStream(
+                samplerate=tb_cfg.get("sample_rate_hz", 16000), channels=1,
+                dtype="float32", device=None,
+            )
+            stream.start()
+            return stream
+        except Exception:
+            return None
+    import sounddevice as sd
+    device = resolve_output_device(device_spec, sd.query_devices())
+    stream = sd.OutputStream(
+        samplerate=tb_cfg.get("sample_rate_hz", 16000), channels=1,
+        dtype="float32", device=device,
+    )
+    stream.start()
+    return stream
