@@ -24,7 +24,14 @@ core:
     # "pipewire" is the only path. Far-field array => proximity floors run
     # ~0.01 (vs ~0.06 near-field C10); do not compare floors across mics.
     device_index: "pipewire"
-    channels: 1
+    # Director-10: open ALL SIX array channels and keep only column 0 —
+    # the XVF-3000's PROCESSED output (beamformed + hardware AEC + NS).
+    # channels: 1 would make PipeWire DOWNMIX all six into the mono stream,
+    # raw capsules AND the ch5 playback reference included, more than
+    # doubling the kiosk's own-TTS bleed (measured 2026-07-06). The stream
+    # the kiosk consumes is still mono 16 kHz.
+    channels: 6
+    use_channel: 0
     sample_rate: 16000
     chunk_size: 480
 

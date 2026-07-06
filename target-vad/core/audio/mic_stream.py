@@ -16,6 +16,15 @@ class MicrophoneStream:
         self.channels = config.get("channels", 1)
         self.chunk_size = config.get("chunk_size", 480)
         self.device_index = config.get("device_index", None)
+        # Which captured column becomes the mono stream. On the ReSpeaker the
+        # device must be opened at its full 6 channels with use_channel 0:
+        # column 0 (PipeWire FL) is the XVF-3000's PROCESSED output
+        # (beamformed + hardware AEC + NS). Opening 1 channel instead makes
+        # PipeWire DOWNMIX all six — raw capsules AND the ch5 playback
+        # reference — which more than doubles the kiosk's own-TTS bleed
+        # (measured 2026-07-06: mono-downmix tone energy 0.0153 vs pure-ch0
+        # 0.0068).
+        self.use_channel = config.get("use_channel", 0)
 
         self._stream: Optional[sd.InputStream] = None
         self._running = False
@@ -24,7 +33,7 @@ class MicrophoneStream:
 
     def _audio_callback(self, indata, frames, time_info, status):
         """sounddevice callback — pushes float32 chunks into ring buffer."""
-        self._buffer.append(indata[:, 0].copy())
+        self._buffer.append(indata[:, self.use_channel].copy())
         self._buffer_event.set()
 
     def start(self):
