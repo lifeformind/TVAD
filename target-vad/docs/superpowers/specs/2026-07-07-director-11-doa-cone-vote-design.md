@@ -62,9 +62,14 @@ A daemon-thread sampler over the existing `core.audio.respeaker` module.
 - **Failure latch:** any USB exception → log once, mark unavailable, all
   subsequent reads return `None`. No retry loop (a dead control path stays
   dead for the session; next session's startup assert reports it).
-- Lifecycle: `start()` / `stop()` (joins the thread), owned by assembly,
-  stopped at session teardown. `doa.enabled: false` → tracker is never
-  constructed.
+- Lifecycle (REVISED at planning): **process-lifetime, owned by kiosk.py** —
+  `start()` after the startup asserts, `stop()` (joins the thread) at process
+  exit. A session-owned tracker cannot work: the owner bearing is calibrated
+  from the wake/seed utterance, whose speech happens BEFORE any session
+  object exists — the tracker must already be sampling during the wake
+  phrase. `doa.enabled: false` → tracker is never constructed and every
+  `doa_angle` stays `None`. `start()` performs one probe read; on failure it
+  marks itself unavailable and never spawns the thread (fail open).
 
 ### 4.2 Event plumbing (`events.py`, `workers/ingestion.py`)
 
@@ -107,9 +112,12 @@ the same fail-safe semantics as camera `UNAVAILABLE`.
 ### 4.4 Owner bearing — seed + tracked (`context.py`, `assembly.py`, `reducer.py`)
 
 - `ctx.owner_bearing: float | None` (new context field, default `None`).
-- **Calibrate:** assembly computes `median_between` over the enrollment/seed
-  segment's span and sets `owner_bearing`. Unavailable at seed time →
-  `None` → cone abstains all session (pure D10 behavior).
+- **Calibrate:** the handoff's `first_segment` carries audio and
+  `duration_ms` but no timestamps, so assembly (which runs within moments of
+  the wake endpoint) computes `median_between(now - (max(dur_s, 1.0) + 1.0),
+  now)` — a lookback window generously covering the wake utterance; the
+  speech-flag filter keeps only voiced samples within it. Unavailable at
+  seed time → `None` → cone abstains all session (pure D10 behavior).
 - **Track:** on an ACCEPTED (served) turn whose `doa_angle` is not `None` and
   in-cone, update `owner_bearing = circular_ema(owner_bearing, doa_angle,
   alpha=cfg.doa_bearing_ema_alpha)` (EMA on the shortest-arc delta). Rejected
@@ -137,9 +145,11 @@ turn_gate:
     bearing_ema_alpha: 0.3 # served-turn bearing tracking rate
 ```
 
-Mapped into `DirectorConfig` as `doa_enabled`, `doa_cone_deg`, `doa_poll_ms`,
-`doa_bearing_ema_alpha` (strict types, following the D09 config-truth
-pattern: every key read, no dead keys).
+Mapping (REVISED at planning, per the config-truth pattern — every key read
+where it is used, no dead keys): `enabled` and `poll_ms` are consumed by
+`kiosk.py` when constructing the tracker (`enabled` strict-bool, `is True`);
+only the two keys the reducer reads — `cone_deg`, `bearing_ema_alpha` — map
+into `DirectorConfig` as `doa_cone_deg`, `doa_bearing_ema_alpha`.
 
 ## 6. Failure policy (user choice: fail open, loud DIAG)
 
