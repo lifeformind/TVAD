@@ -27,6 +27,7 @@ class SegmentEndpointed:
     # the consuming commands so a command can never grab a LATER segment's
     # staged audio (overwrite-last race). 0 = the assembly-seeded first segment.
     seq: int = 0
+    doa_angle: "float | None" = None   # circular median over the segment span (Director-11); None = no signal
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class NearFieldOnset:
     """Voiced onset during SPEAKING — the duck-at-onset reflex trigger."""
     rms: float
     is_target: bool
+    doa_angle: "float | None" = None   # latest speech-flagged sample at onset (Director-11)
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ class InterjectionSegment:
     is_target: bool
     speaker_score: float             # ECAPA/pVAD score vs primary (off hot path)
     seq: int = 0                     # staging sequence (see SegmentEndpointed)
+    doa_angle: "float | None" = None   # circular median over the segment span (Director-11)
 
 
 @dataclass(frozen=True)

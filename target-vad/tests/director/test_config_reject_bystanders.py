@@ -21,3 +21,18 @@ def test_mapping_malformed_value_is_false():
     for bad in ("flase", "true", 1, "yes"):
         cfg = _director_config_from({"turn_gate": {"reject_bystanders": bad}})
         assert cfg.reject_bystanders is False, bad
+
+
+def test_doa_keys_map_from_turn_gate_doa():
+    from modes.director.assembly import _director_config_from
+    cfg = _director_config_from({"turn_gate": {"doa": {
+        "cone_deg": 25, "bearing_ema_alpha": 0.5}}})
+    assert cfg.doa_cone_deg == 25.0
+    assert cfg.doa_bearing_ema_alpha == 0.5
+
+
+def test_doa_keys_default_when_absent():
+    from modes.director.assembly import _director_config_from
+    cfg = _director_config_from({})
+    assert cfg.doa_cone_deg == 20.0
+    assert cfg.doa_bearing_ema_alpha == 0.3

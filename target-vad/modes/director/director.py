@@ -12,8 +12,9 @@ from modes.talkback.conversation import ConversationManager
 
 class Director:
     def __init__(self, cfg: DirectorConfig, conversation: ConversationManager,
-                 now: float, proximity_rms: float):
-        self.ctx: Context = new_context(cfg, conversation, now, proximity_rms)
+                 now: float, proximity_rms: float, owner_bearing=None):
+        self.ctx: Context = new_context(cfg, conversation, now, proximity_rms,
+                                        owner_bearing=owner_bearing)
         self.state: State = State.LISTENING
 
     def dispatch(self, event) -> list:

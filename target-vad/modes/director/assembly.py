@@ -169,6 +169,10 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
         reject_bystanders=tb_cfg.get("turn_gate", {}).get("reject_bystanders", False) is True,
         lockout_enabled=tb_cfg.get("turn_gate", {}).get("lockout", {})
                               .get("enabled", False) is True,
+        doa_cone_deg=float(tb_cfg.get("turn_gate", {}).get("doa", {})
+                                 .get("cone_deg", 20.0)),
+        doa_bearing_ema_alpha=float(tb_cfg.get("turn_gate", {}).get("doa", {})
+                                          .get("bearing_ema_alpha", 0.3)),
     )
 
 

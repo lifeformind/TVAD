@@ -79,7 +79,11 @@ class DirectorRuntime:
         try:
             while self._result_reason is None:
                 event = await self._bus.get()
+                bearing_before = self._director.ctx.owner_bearing
                 commands = self._director.dispatch(event)
+                if _DIAG and self._director.ctx.owner_bearing != bearing_before:
+                    _diag(f"owner bearing {bearing_before:.1f}° -> "
+                          f"{self._director.ctx.owner_bearing:.1f}°")
                 if _DIAG and type(event).__name__ != "Tick":
                     _diag(f"event={type(event).__name__} -> state={self._director.state.name}"
                           f" cmds={[type(c).__name__ for c in commands]}{_event_text(event)}")

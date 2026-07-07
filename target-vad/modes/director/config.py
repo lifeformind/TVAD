@@ -28,3 +28,8 @@ class DirectorConfig:
     # (verdicts + WARN visibility, no session ends). Strict-bool mapped from
     # turn_gate.lockout.enabled.
     lockout_enabled: bool = False
+    # Director-11: DOA cone vote. Direction is a fourth gate; a None angle
+    # always abstains, so there is no enabled flag here — kiosk.py gates
+    # tracker construction, and no tracker means every doa_angle is None.
+    doa_cone_deg: float = 20.0           # cone half-width, degrees (spike-validated)
+    doa_bearing_ema_alpha: float = 0.3   # served-turn bearing tracking rate

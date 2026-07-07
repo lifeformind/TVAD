@@ -28,12 +28,14 @@ class Context:
     presence_since: float = 0.0          # monotonic time of the last presence change
     windows_seen: int = 0           # SpeakerWindowVerdict count (Director-09)
     miss_streak: int = 0            # consecutive smoother-fail windows (Director-09)
+    owner_bearing: Optional[float] = None   # calibrated owner DOA (Director-11); None = cone abstains
 
 
 def new_context(cfg: DirectorConfig, conversation: ConversationManager,
-                now: float, proximity_rms: float) -> Context:
+                now: float, proximity_rms: float,
+                owner_bearing: Optional[float] = None) -> Context:
     return Context(
         cfg=cfg, conversation=conversation, proximity_rms=proximity_rms,
         now=now, started_at=now, last_speech_at=now,
-        presence_since=now,
+        presence_since=now, owner_bearing=owner_bearing,
     )

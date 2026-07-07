@@ -11,6 +11,7 @@ from modes.director import events as E
 from modes.director import commands as C
 from modes.director.events import PresenceStatus
 from modes.talkback.intent import Interjection, classify_interjection
+from core.audio.doa_math import circular_distance, circular_ema
 
 
 def silence_duration(state: State, ctx: Context) -> float:
@@ -53,7 +54,8 @@ def reduce(state: State, ctx: Context, event) -> tuple:
             return State.EVALUATING, []
         return state, []
     if isinstance(event, E.NearFieldOnset) and state is State.SPEAKING:
-        if event.is_target and event.rms >= ctx.proximity_rms:
+        if (event.is_target and event.rms >= ctx.proximity_rms
+                and in_owner_cone(ctx, event.doa_angle) is not False):
             ctx.ducked = True
             return State.EVALUATING, [C.Duck(ctx.cfg.duck_level)]
         return State.SPEAKING, []
@@ -128,6 +130,15 @@ class TurnVerdict(enum.Enum):
     REJECT_TOO_QUIET = "too_quiet"          # below proximity floor (distant bystander)
     REJECT_OWNER_ABSENT = "owner_absent_frame"  # owner not in camera frame
     REJECT_SPEAKER_UNVERIFIED = "speaker_unverified"  # safety-net streak active
+    REJECT_OUT_OF_CONE = "out_of_cone"      # DOA outside the owner cone (Director-11)
+
+
+def in_owner_cone(ctx: Context, doa_angle):
+    """Direction vote (Director-11): None = abstain (no signal — fail open,
+    the other gates decide), True = within the cone, False = out of cone."""
+    if doa_angle is None or ctx.owner_bearing is None:
+        return None
+    return circular_distance(doa_angle, ctx.owner_bearing) <= ctx.cfg.doa_cone_deg
 
 
 def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
@@ -146,6 +157,8 @@ def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
         return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
     if ev.rms < ctx.proximity_rms:
         return TurnVerdict.REJECT_TOO_QUIET
+    if in_owner_cone(ctx, ev.doa_angle) is False:
+        return TurnVerdict.REJECT_OUT_OF_CONE
     if ctx.presence_status is PresenceStatus.ABSENT:
         return TurnVerdict.REJECT_OWNER_ABSENT
     return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
@@ -156,7 +169,8 @@ def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
     still accumulating. None for non-reject verdicts keeps the log quiet."""
     v = classify_new_turn(ctx, ev)
     if v in (TurnVerdict.REJECT_NOT_TARGET, TurnVerdict.REJECT_TOO_QUIET,
-             TurnVerdict.REJECT_OWNER_ABSENT, TurnVerdict.REJECT_SPEAKER_UNVERIFIED):
+             TurnVerdict.REJECT_OWNER_ABSENT, TurnVerdict.REJECT_SPEAKER_UNVERIFIED,
+             TurnVerdict.REJECT_OUT_OF_CONE):
         return v.value
     return None
 
@@ -197,6 +211,10 @@ def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
         cmds = [C.AccumulateSpeakerAudio(seq=ev.seq)]
         if v is TurnVerdict.ACCEPT:
             cmds.append(C.TranscribeUserTurn(seq=ev.seq))
+            if in_owner_cone(ctx, ev.doa_angle) is True:
+                ctx.owner_bearing = circular_ema(
+                    ctx.owner_bearing, ev.doa_angle,
+                    ctx.cfg.doa_bearing_ema_alpha)
         return State.LISTENING, cmds
     # Rejected. Legacy mode (reject_bystanders off) keeps its historical clock
     # reset on ANY voiced segment; reject-by-default does not.
@@ -236,6 +254,8 @@ def _restore_speaking(ctx: Context) -> tuple:
 def _on_interjection_segment(ctx: Context, ev: E.InterjectionSegment) -> tuple:
     # Reject ladder (spec s6) — NEVER cut on these; always RESTORE.
     if ev.rms < ctx.proximity_rms:                       # proximity pre-gate
+        return _restore_speaking(ctx)
+    if in_owner_cone(ctx, ev.doa_angle) is False:        # wrong direction (Director-11)
         return _restore_speaking(ctx)
     if ev.duration_ms < ctx.cfg.verify_window_ms:        # too short to verify
         return _restore_speaking(ctx)
