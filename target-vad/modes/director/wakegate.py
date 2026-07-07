@@ -30,7 +30,8 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
-from core.audio.doa_math import fraction_vote
+from core.audio.doa_math import (circular_distance, circular_median,
+                                 fraction_vote)
 from core.audio.mic_stream import MicrophoneStream
 from core.speaker.embedder import EmbeddingExtractor
 from core.vad.silero_vad import SileroVAD, SpeechSegment
@@ -86,6 +87,7 @@ class WakeGate:
         self._doa = doa_tracker
         self._doa_cfg = self._talkback_config.get("turn_gate", {}).get("doa", {})
         self._wake_bearing: Optional[float] = None
+        self._wake_bearing_known = False   # None is a real outcome; compute once
         self._running = False
         # Set by _start_session_from_segment; consumed by run(). Lets us CLOSE the
         # wake mic generator before runtime.run so the Director's ingestion worker
@@ -220,14 +222,11 @@ class WakeGate:
         tracker, no bearing, thin evidence) enrolls — fail open."""
         if self._doa is None:
             return True
-        if self._wake_bearing is None:
+        if not self._wake_bearing_known:
             # Lazily, once per wake: the phrase ends at _wake_time, so its
-            # samples exist by the time the first candidate segment arrives
-            # (+0.3s covers detector latency). The spike showed DOA holds the
-            # owner during simultaneous speech, so this window medians to the
-            # owner even with a podcast running.
-            self._wake_bearing = self._doa.median_between(
-                self._wake_time - 1.5, self._wake_time + 0.3)
+            # samples exist by the time the first candidate segment arrives.
+            self._wake_bearing = self._compute_wake_bearing()
+            self._wake_bearing_known = True
         now = time.monotonic()
         angles = self._doa.angles_between(now - segment.duration_ms / 1000.0, now)
         vote = fraction_vote(
@@ -240,6 +239,46 @@ class WakeGate:
                   f"(bearing={self._wake_bearing:.0f}°, n={len(angles or ())})",
                   file=sys.stderr, flush=True)
         return vote is not False
+
+    # Wake-bearing windows (s): the phrase spans ~WAKE_WINDOW before the
+    # detector fires (+MARGIN for detector latency); AMBIENT is the baseline
+    # span before the phrase.
+    WAKE_WINDOW_S = 1.5
+    WAKE_MARGIN_S = 0.3
+    AMBIENT_WINDOW_S = 6.0
+
+    def _compute_wake_bearing(self) -> Optional[float]:
+        """Owner bearing from the wake phrase. A plain median over the wake
+        window gets OUTVOTED by continuous background speech (live 2026-07-07
+        19:46: bearing landed on the podcast, 90° from the user, while the
+        array's LED tracked the user whenever they spoke). The wake event
+        proves the OWNER spoke in this window, so when ambient speech exists
+        the owner is the NOVEL cluster — samples deviating from the pre-wake
+        ambient bearing by more than the cone. No novel cluster (owner
+        co-located with the source, or unseen) -> None: a wrong bearing locks
+        the owner out; an abstaining one degrades to D10 behavior."""
+        w = self._wake_time
+        ambient = self._doa.median_between(w - self.AMBIENT_WINDOW_S,
+                                           w - self.WAKE_WINDOW_S)
+        if ambient is None:
+            bearing = self._doa.median_between(w - self.WAKE_WINDOW_S,
+                                               w + self.WAKE_MARGIN_S)
+            if os.environ.get("TVAD_DIAG"):
+                shown = f"{bearing:.0f}°" if bearing is not None else "abstain"
+                print(f"[DIAG wakegate] wake bearing: quiet ambient -> {shown}",
+                      file=sys.stderr, flush=True)
+            return bearing
+        cone = float(self._doa_cfg.get("cone_deg", 20.0))
+        angles = self._doa.angles_between(w - self.WAKE_WINDOW_S,
+                                          w + self.WAKE_MARGIN_S) or ()
+        novel = [a for a in angles if circular_distance(a, ambient) > cone]
+        bearing = circular_median(novel) if len(novel) >= 2 else None
+        if os.environ.get("TVAD_DIAG"):
+            shown = f"{bearing:.0f}°" if bearing is not None else "abstain"
+            print(f"[DIAG wakegate] wake bearing: ambient={ambient:.0f}° "
+                  f"novel={len(novel)}/{len(angles)} -> {shown}",
+                  file=sys.stderr, flush=True)
+        return bearing
 
     def _start_session_from_segment(self, segment: SpeechSegment) -> None:
         try:
@@ -307,6 +346,7 @@ class WakeGate:
         self._state = "IDLE"
         self._wake_time = None
         self._wake_bearing = None
+        self._wake_bearing_known = False
         self.wake_detector.reset()
 
     def _safe_callback(self, fn: Callable, *args) -> None:
