@@ -204,7 +204,11 @@ class WakeGate:
             return
 
         for segment in self.vad.process_chunk(chunk):
-            if not self._seed_from_wake_direction(segment):
+            ok = self._seed_from_wake_direction(segment)
+            if os.environ.get("TVAD_DIAG"):
+                print(f"[DIAG wakegate] seed candidate dur={segment.duration_ms:.0f}ms "
+                      f"direction_ok={ok}", file=sys.stderr, flush=True)
+            if not ok:
                 continue                 # bystander-direction seed: keep waiting
             self._start_session_from_segment(segment)
             return  # only the first OWNER-DIRECTION segment matters
@@ -240,8 +244,15 @@ class WakeGate:
     def _start_session_from_segment(self, segment: SpeechSegment) -> None:
         try:
             embedding = self.embedder.extract(segment.audio)
-        except Exception:
-            self._reset_to_idle()
+        except Exception as e:
+            # Infra failure on THIS segment only: stay in AWAIT so the next
+            # utterance retries without a re-wake (live 2026-07-07 19:38: the
+            # old silent reset-to-IDLE made the kiosk deaf after the wake —
+            # three wakes, zero sessions, nothing printed). The
+            # awaiting_speech_timeout backstop still bounds the phase.
+            if os.environ.get("TVAD_DIAG"):
+                print(f"[DIAG wakegate] seed embed failed ({e}); awaiting retry",
+                      file=sys.stderr, flush=True)
             return
 
         # Verify-before-serve (Director-09 spec s5): split-half self-similarity.
@@ -257,12 +268,18 @@ class WakeGate:
             try:
                 emb_a = self.embedder.extract(segment.audio[:half])
                 emb_b = self.embedder.extract(segment.audio[half:])
-            except Exception:
-                self._reset_to_idle()      # infra failure == the existing embed-fail path
+            except Exception as e:
+                if os.environ.get("TVAD_DIAG"):     # infra failure == embed-fail path
+                    print(f"[DIAG wakegate] half embed failed ({e}); awaiting retry",
+                          file=sys.stderr, flush=True)
                 return
             ok, score = verify_before_serve(emb_a, emb_b, thr)
             if not ok:
-                self._reset_to_idle()
+                # Contaminated/garbage seed (a user utterance mixed with
+                # background speech fails split-half self-similarity). Stay in
+                # AWAIT — the next utterance retries without a re-wake; the
+                # refusal is LOUD via the verify_refused event (the old silent
+                # reset left the user talking to a kiosk that had given up).
                 self._safe_callback(self.on_event, "verify_refused",
                                     {"score": float(score)})
                 return

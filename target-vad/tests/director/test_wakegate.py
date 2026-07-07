@@ -122,15 +122,19 @@ class TestHandoff:
         assert g._state == "IDLE"
         fake_wake.reset.assert_called()
 
-    def test_failed_snapshot_returns_to_idle_without_handoff(
+    def test_failed_snapshot_stays_awaiting_for_retry(
             self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime):
+        # 2026-07-07 19:38 live: silent reset-to-IDLE on a bad seed made the
+        # kiosk deaf right after the wake. Infra failure on one segment now
+        # keeps AWAIT alive so the next utterance retries without a re-wake
+        # (awaiting_speech_timeout still bounds the phase).
         fake_embedder.extract.side_effect = RuntimeError("snapshot failed")
         g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake, fake_runtime)
         fake_wake.process.return_value = 0.87
         g._handle_chunk(np.zeros(480, dtype=np.float32))
         fake_vad.process_chunk.return_value = [make_segment()]
         g._handle_chunk(np.zeros(480, dtype=np.float32))
-        assert g._state == "IDLE"
+        assert g._state == "AWAIT_FIRST_SEGMENT"
         fake_runtime.run.assert_not_called()
 
     def test_session_end_reason_propagates_from_director_result(
@@ -193,7 +197,7 @@ class TestVerifyBeforeServe:
                       on_event=lambda et, pl: events.append((et, pl)))
         drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
         fake_runtime.run.assert_not_called()
-        assert g._state == "IDLE"
+        assert g._state == "AWAIT_FIRST_SEGMENT"   # retry, not reset (19:38 live)
         types = [et for et, _ in events]
         assert "verify_refused" in types and "session_started" not in types
         refused = next(pl for et, pl in events if et == "verify_refused")
@@ -250,6 +254,34 @@ class TestVerifyBeforeServe:
                       fake_runtime, on_event=lambda et, pl: events.append((et, pl)))
         drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
         fake_runtime.run.assert_not_called()
-        assert g._state == "IDLE"
+        assert g._state == "AWAIT_FIRST_SEGMENT"   # retry, not reset (19:38 live)
         # infra failure, not a verdict: no verify_refused event
         assert "verify_refused" not in [et for et, _ in events]
+
+
+class TestSeedRetry:
+    def test_refused_seed_then_clean_seed_enrolls_without_rewake(
+            self, base_config, fake_mic, fake_vad, fake_wake, fake_runtime):
+        # First utterance fails split-half (contaminated); the SECOND utterance
+        # in the same AWAIT window enrolls — no re-wake needed (19:38 live fix).
+        a = np.zeros(192, dtype=np.float32); a[0] = 1.0
+        b = np.zeros(192, dtype=np.float32); b[1] = 1.0
+        good = np.ones(192, dtype=np.float32)
+        seq = [good, a, b,          # segment 1: full, half_a, half_b -> refused
+               good, good, good]    # segment 2: self-similar -> enrolls
+        emb = MagicMock()
+        emb.extract = MagicMock(side_effect=lambda audio: seq.pop(0))
+        events = []
+        g = make_gate(base_config, fake_mic, fake_vad, emb, fake_wake,
+                      fake_runtime, on_event=lambda et, pl: events.append((et, pl)))
+        fake_wake.process.return_value = 0.87
+        g._handle_chunk(np.zeros(480, dtype=np.float32))       # wake
+        fake_wake.process.return_value = None
+        fake_vad.process_chunk.return_value = [make_segment(1000.0)]
+        g._handle_chunk(np.zeros(480, dtype=np.float32))       # seed 1: refused
+        assert g._pending_handoff is None
+        assert g._state == "AWAIT_FIRST_SEGMENT"
+        g._handle_chunk(np.zeros(480, dtype=np.float32))       # seed 2: enrolls
+        assert g._pending_handoff is not None
+        types = [et for et, _ in events]
+        assert "verify_refused" in types and "session_started" in types

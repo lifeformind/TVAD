@@ -36,6 +36,11 @@ def _make_event_printer(console: Console):
         elif event_type == "session_ended":
             console.print(f"[bold yellow][SESSION ENDED][/] reason={payload['reason']}\n")
             console.print("[dim][IDLE] Listening for wake phrase...[/]")
+        elif event_type == "verify_refused":
+            console.print(
+                f"[yellow]Enrollment self-check failed "
+                f"(score={payload['score']:.2f}) — please speak again...[/]"
+            )
         elif event_type == "awaiting_speech_timeout":
             # Pre-session abort (no session ever started); fall back to IDLE.
             console.print("[dim][IDLE] No speech after wake; listening again...[/]")
