@@ -27,6 +27,10 @@ class DirectorHandoff:
     config: dict
     vad: Any
     embedder: Any
+    # Director-11: owner DOA measured over the wake phrase's own time window —
+    # the one utterance guaranteed to be the owner. None = no signal (cone
+    # abstains / assembly falls back to its lookback calibration).
+    wake_bearing: Optional[float] = None
 
 
 @dataclass(frozen=True)

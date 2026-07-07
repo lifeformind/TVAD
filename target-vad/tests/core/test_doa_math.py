@@ -51,3 +51,30 @@ def test_ema_shortest_arc_across_zero():
 
 def test_ema_result_wrapped_to_0_360():
     assert 0.0 <= circular_ema(355.0, 15.0, 0.9) < 360.0
+
+
+# ---- fraction_vote (Director-11 segment/seed vote) ----
+
+def test_fraction_vote_abstains_on_thin_evidence():
+    from core.audio.doa_math import fraction_vote
+    # Live 2026-07-07 19:04: n=1, 100% in-cone got REJECTED. Thin evidence
+    # must abstain, never reject.
+    assert fraction_vote((97.0,), 97.0, 20.0, 0.25, 3) is None
+    assert fraction_vote((193.0, 193.0), 97.0, 20.0, 0.25, 3) is None
+    assert fraction_vote((), 97.0, 20.0, 0.25, 3) is None
+    assert fraction_vote(None, 97.0, 20.0, 0.25, 3) is None
+    assert fraction_vote((97.0,) * 5, None, 20.0, 0.25, 3) is None
+
+
+def test_fraction_vote_passes_enough_in_cone_share():
+    from core.audio.doa_math import fraction_vote
+    mixed = (193.0,) * 9 + (97.0, 95.0, 100.0)          # 3/12 = 25%
+    assert fraction_vote(mixed, 97.0, 20.0, 0.25, 3) is True
+
+
+def test_fraction_vote_rejects_with_sufficient_evidence():
+    from core.audio.doa_math import fraction_vote
+    assert fraction_vote((193.0,) * 8, 97.0, 20.0, 0.25, 3) is False
+    # enough total samples but too few / too small a share in-cone
+    assert fraction_vote((193.0,) * 6 + (97.0, 95.0), 97.0, 20.0, 0.25, 3) is False
+    assert fraction_vote((193.0,) * 17 + (97.0, 95.0, 100.0), 97.0, 20.0, 0.25, 3) is False

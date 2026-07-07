@@ -47,6 +47,22 @@ def test_short_seed_still_gets_a_full_lookback():
     assert (t1 - t0) == pytest.approx(2.0, abs=0.01)   # max(0.2, 1.0) + 1.0
 
 
+def test_wake_bearing_preferred_over_lookback():
+    # Director-11 fix (2026-07-07 19:04): the lookback samples "whatever spoke
+    # recently" and a continuous podcast dominated it — the bearing calibrated
+    # to the bystander. The WakeGate's wake-anchored measurement wins.
+    doa = _FakeDoa(median=250.0)                        # what the lookback would say
+    bearing = _calibrate_owner_bearing(doa, _first_segment(), wake_bearing=97.0)
+    assert bearing == 97.0
+    assert doa.windows == []                            # lookback never consulted
+
+
+def test_no_wake_bearing_falls_back_to_lookback():
+    doa = _FakeDoa(median=97.0)
+    assert _calibrate_owner_bearing(doa, _first_segment(), wake_bearing=None) == 97.0
+    assert len(doa.windows) == 1
+
+
 def test_tracker_with_no_samples_returns_none():
     class _Empty:
         def median_between(self, t0, t1):

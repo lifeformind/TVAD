@@ -11,7 +11,8 @@ from modes.director import events as E
 from modes.director import commands as C
 from modes.director.events import PresenceStatus
 from modes.talkback.intent import Interjection, classify_interjection
-from core.audio.doa_math import circular_distance, circular_ema, circular_median
+from core.audio.doa_math import (circular_distance, circular_ema,
+                                 circular_median, fraction_vote)
 
 
 def silence_duration(state: State, ctx: Context) -> float:
@@ -152,14 +153,13 @@ def cone_vote(ctx: Context, doa_angles):
     segment — NOT who spoke most. With continuous background speech the VAD
     merges the owner's utterance into a bystander-dominated segment, so a
     duration-majority median votes the bystander and rejects the owner (live
-    2026-07-07 18:42). Pass if enough speech-flagged samples point at the
-    owner: >= min_in_cone_samples AND >= min_in_cone_fraction of the segment.
-    None = abstain (no samples / no bearing — fail open)."""
+    2026-07-07 18:42). None = abstain: no samples, no bearing, or fewer than
+    min_in_cone_samples total (thin evidence never rejects — fail open)."""
     if not doa_angles or ctx.owner_bearing is None:
         return None
-    hits = _in_cone_samples(ctx, doa_angles)
-    return (len(hits) >= ctx.cfg.doa_min_in_cone_samples
-            and len(hits) / len(doa_angles) >= ctx.cfg.doa_min_in_cone_fraction)
+    return fraction_vote(doa_angles, ctx.owner_bearing, ctx.cfg.doa_cone_deg,
+                         ctx.cfg.doa_min_in_cone_fraction,
+                         ctx.cfg.doa_min_in_cone_samples)
 
 
 def cone_diag(ctx: Context, doa_angles) -> str:

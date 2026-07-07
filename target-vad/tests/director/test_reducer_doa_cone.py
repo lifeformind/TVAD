@@ -80,8 +80,23 @@ def test_vote_passes_owner_minority_in_merged_segment():
 
 
 def test_vote_needs_min_samples_even_at_fraction():
-    # 2 of 8 = 25% fraction but < 3 samples: a lone DOA blip isn't the owner.
+    # 2 of 8 = 25% fraction but < 3 in-cone samples: a lone DOA blip isn't
+    # the owner (total evidence IS sufficient here, so this is a real reject).
     assert cone_vote(_ctx(), (PODCAST,) * 6 + (97.0, 95.0)) is False
+
+
+def test_vote_abstains_on_thin_total_evidence():
+    # Live 2026-07-07 19:04: a 1-sample segment that was 100% in-cone got
+    # REJECT=out_of_cone. Fewer than min_in_cone_samples TOTAL samples means
+    # the vote abstains (fail open) — it never rejects on thin evidence.
+    assert cone_vote(_ctx(), (254.0,)) is None
+    assert cone_vote(_ctx(), (PODCAST, PODCAST)) is None
+
+
+def test_thin_evidence_turn_is_served():
+    ctx = _ctx()
+    state, cmds = reduce(State.LISTENING, ctx, _seg(doa=(97.0,)))
+    assert cmds == [C.AccumulateSpeakerAudio(), C.TranscribeUserTurn()]
 
 
 def test_vote_needs_min_fraction_even_with_samples():

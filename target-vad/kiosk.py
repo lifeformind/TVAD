@@ -50,6 +50,7 @@ def build_wakegate(
     _vad: Optional[Any] = None,
     _embedder: Optional[Any] = None,
     _wake_detector: Optional[Any] = None,
+    doa_tracker: Optional[Any] = None,
 ) -> WakeGate:
     """Construct the WakeGate around a DirectorRuntime. Underscore kwargs inject
     fakes in tests; production passes none and the WakeGate builds real I/O."""
@@ -58,6 +59,7 @@ def build_wakegate(
         runtime=runtime,
         on_event=_make_event_printer(console),
         _mic=_mic, _vad=_vad, _embedder=_embedder, _wake_detector=_wake_detector,
+        doa_tracker=doa_tracker,
     )
 
 
@@ -263,7 +265,8 @@ def main():
         f"[bold][TALKBACK][/] Listening for "
         f"[bold cyan]\"{config['kiosk']['wake_phrase']}\"[/]..."
     )
-    gate = build_wakegate(config, console, runtime=runtime)
+    gate = build_wakegate(config, console, runtime=runtime,
+                          doa_tracker=doa_tracker)
 
     try:
         gate.run()

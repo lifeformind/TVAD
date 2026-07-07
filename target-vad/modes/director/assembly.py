@@ -210,12 +210,22 @@ def _calibrate_proximity_rms(first_segment, tb_cfg: dict) -> float:
     return thr
 
 
-def _calibrate_owner_bearing(doa_tracker, first_segment):
+def _calibrate_owner_bearing(doa_tracker, first_segment, wake_bearing=None):
     """Owner bearing from the wake utterance (Director-11). The handoff's
     first_segment has no timestamps, so use a lookback window from 'now'
     (assembly runs within moments of the wake endpoint) generously covering
     the utterance; the tracker's speech-flag filter keeps only voiced
     samples. None (no tracker / no samples) -> the cone abstains all session."""
+    if wake_bearing is not None:
+        # Director-11 fix (live 2026-07-07 19:04): the lookback below samples
+        # "whatever spoke recently", which a continuous podcast dominates —
+        # the bearing calibrated to the BYSTANDER. The WakeGate now measures
+        # the bearing over the wake phrase's own window (the one utterance
+        # guaranteed to be the owner); prefer it whenever it exists.
+        if os.environ.get("TVAD_DIAG"):
+            print(f"[DIAG assembly] owner bearing: {wake_bearing:.0f}° "
+                  "(wake-anchored)", file=sys.stderr, flush=True)
+        return wake_bearing
     if doa_tracker is None:
         return None
     dur_s = float(getattr(first_segment, "duration_ms", 0.0) or 0.0) / 1000.0
@@ -332,7 +342,9 @@ def build_director_runtime(
     )
     proximity_rms = _calibrate_proximity_rms(handoff.first_segment, tb_cfg)
     now = clock()
-    owner_bearing = _calibrate_owner_bearing(doa_tracker, handoff.first_segment)
+    owner_bearing = _calibrate_owner_bearing(
+        doa_tracker, handoff.first_segment,
+        getattr(handoff, "wake_bearing", None))
     director = Director(cfg, conversation, now=now, proximity_rms=proximity_rms,
                         owner_bearing=owner_bearing)
 

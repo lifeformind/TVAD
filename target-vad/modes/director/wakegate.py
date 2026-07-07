@@ -30,6 +30,7 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
+from core.audio.doa_math import fraction_vote
 from core.audio.mic_stream import MicrophoneStream
 from core.speaker.embedder import EmbeddingExtractor
 from core.vad.silero_vad import SileroVAD, SpeechSegment
@@ -49,6 +50,7 @@ class WakeGate:
         _vad: Optional[Any] = None,
         _embedder: Optional[Any] = None,
         _wake_detector: Optional[Any] = None,
+        doa_tracker: Optional[Any] = None,
     ):
         self.config = config
         self.runtime = runtime
@@ -74,6 +76,16 @@ class WakeGate:
         )
 
         self._wake_time: Optional[float] = None
+        # Director-11 seed direction filter (live 2026-07-07 19:04: waking
+        # while a podcast played let the podcast become the enrollment seed —
+        # floor, voiceprint AND bearing enrolled on the bystander). The wake
+        # phrase is the one utterance guaranteed to be the owner, so the
+        # bearing is measured over ITS time window and candidate seeds must
+        # come from that direction. No tracker / no samples = fail open
+        # (first-segment-wins, exactly pre-D11).
+        self._doa = doa_tracker
+        self._doa_cfg = self._talkback_config.get("turn_gate", {}).get("doa", {})
+        self._wake_bearing: Optional[float] = None
         self._running = False
         # Set by _start_session_from_segment; consumed by run(). Lets us CLOSE the
         # wake mic generator before runtime.run so the Director's ingestion worker
@@ -192,8 +204,38 @@ class WakeGate:
             return
 
         for segment in self.vad.process_chunk(chunk):
+            if not self._seed_from_wake_direction(segment):
+                continue                 # bystander-direction seed: keep waiting
             self._start_session_from_segment(segment)
-            return  # only the first segment matters
+            return  # only the first OWNER-DIRECTION segment matters
+
+    def _seed_from_wake_direction(self, segment: SpeechSegment) -> bool:
+        """Direction-filter the enrollment seed against the wake bearing
+        (Director-11). True = enroll this segment; False = skip it and keep
+        waiting (awaiting_speech_timeout is the backstop). Abstain (no
+        tracker, no bearing, thin evidence) enrolls — fail open."""
+        if self._doa is None:
+            return True
+        if self._wake_bearing is None:
+            # Lazily, once per wake: the phrase ends at _wake_time, so its
+            # samples exist by the time the first candidate segment arrives
+            # (+0.3s covers detector latency). The spike showed DOA holds the
+            # owner during simultaneous speech, so this window medians to the
+            # owner even with a podcast running.
+            self._wake_bearing = self._doa.median_between(
+                self._wake_time - 1.5, self._wake_time + 0.3)
+        now = time.monotonic()
+        angles = self._doa.angles_between(now - segment.duration_ms / 1000.0, now)
+        vote = fraction_vote(
+            angles or (), self._wake_bearing,
+            float(self._doa_cfg.get("cone_deg", 20.0)),
+            float(self._doa_cfg.get("min_in_cone_fraction", 0.25)),
+            int(self._doa_cfg.get("min_in_cone_samples", 3)))
+        if vote is False and os.environ.get("TVAD_DIAG"):
+            print(f"[DIAG wakegate] seed rejected: out of wake cone "
+                  f"(bearing={self._wake_bearing:.0f}°, n={len(angles or ())})",
+                  file=sys.stderr, flush=True)
+        return vote is not False
 
     def _start_session_from_segment(self, segment: SpeechSegment) -> None:
         try:
@@ -241,11 +283,13 @@ class WakeGate:
             config=self._talkback_config,
             vad=self.vad,
             embedder=self.embedder,
+            wake_bearing=self._wake_bearing,
         )
 
     def _reset_to_idle(self) -> None:
         self._state = "IDLE"
         self._wake_time = None
+        self._wake_bearing = None
         self.wake_detector.reset()
 
     def _safe_callback(self, fn: Callable, *args) -> None:
