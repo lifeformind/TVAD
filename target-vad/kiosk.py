@@ -110,6 +110,19 @@ def _assert_array_startup(config: dict, console: Console) -> None:
         console.print(
             f"[yellow]![/] ReSpeaker AGC assert failed ({e}); "
             "continuing with AGC on — proximity floors will be less stable")
+    # Director-11 DOA probe — warn-only (fail open: no DOA means the cone
+    # gate abstains and behavior degrades to Director-10, not a dead kiosk).
+    doa_cfg = tb_cfg.get("turn_gate", {}).get("doa", {})
+    if doa_cfg.get("enabled", False) is True:
+        try:
+            from core.audio import respeaker
+            dev = respeaker.find()
+            if dev is None:
+                raise RuntimeError("ReSpeaker not found on USB (2886:0018)")
+            angle = respeaker.read_param(dev, "DOAANGLE")
+            console.print(f"[green]✓[/] DOA control readable (bearing now {angle}°)")
+        except Exception as e:
+            console.print(f"[red]✗[/] DOA unavailable ({e}) — cone gate will abstain")
 
 
 class _LazyDirectorRuntime:
@@ -123,13 +136,14 @@ class _LazyDirectorRuntime:
     DirectorResult. One blocking call per session, exactly as the WakeGate
     expects (spec section 4a.2)."""
 
-    def __init__(self, config: dict, stt, llm, tts, player, logger):
+    def __init__(self, config: dict, stt, llm, tts, player, logger, doa_tracker=None):
         self._config = config
         self._stt = stt
         self._llm = llm
         self._tts = tts
         self._player = player
         self._logger = logger
+        self._doa_tracker = doa_tracker
 
     def run(self, handoff):
         from modes.director.assembly import build_director_runtime
@@ -139,6 +153,7 @@ class _LazyDirectorRuntime:
             handoff, stt=self._stt, llm=self._llm, tts=self._tts,
             player=self._player, logger=self._logger,
             _watchdog_tick_s=watchdog_tick_s,
+            doa_tracker=self._doa_tracker,
         )
         return factory.run(handoff)
 
@@ -229,6 +244,16 @@ def main():
 
     runtime = _build_runtime(config)
     _assert_array_startup(config, console)
+
+    doa_tracker = None
+    doa_cfg = (config["kiosk"].get("talkback", {})
+                              .get("turn_gate", {}).get("doa", {}))
+    if doa_cfg.get("enabled", False) is True:
+        from core.audio.doa_tracker import DoaTracker
+        doa_tracker = DoaTracker(poll_s=float(doa_cfg.get("poll_ms", 150)) / 1000.0)
+        doa_tracker.start()          # unavailable -> logs once, reads return None
+        runtime._doa_tracker = doa_tracker
+
     console.print(
         f"[bold][TALKBACK][/] Listening for "
         f"[bold cyan]\"{config['kiosk']['wake_phrase']}\"[/]..."
@@ -239,6 +264,9 @@ def main():
         gate.run()
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/]")
+    finally:
+        if doa_tracker is not None:
+            doa_tracker.stop()
 
 
 if __name__ == "__main__":

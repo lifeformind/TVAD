@@ -152,6 +152,17 @@ kiosk:
         enabled: true
         window_size: 3
         min_matches: 1
+      # Director-11: DOA cone vote — direction as a fourth gate. The tracker
+      # samples DOAANGLE/SPEECHDETECTED continuously (a decision-time read
+      # would see whatever is loud NOW); segments are scored by circular
+      # median over their own span; the cone abstains whenever any signal is
+      # missing (fail open -> Director-10 behavior). Only a real boolean
+      # true enables.
+      doa:
+        enabled: true
+        cone_deg: 20             # half-width; ±20° scored 100% on the 2026-07-06 spike
+        poll_ms: 150             # firmware update cadence
+        bearing_ema_alpha: 0.3   # served-turn bearing tracking rate
 
     # Barge-in: the registered user (session primary) can interrupt the AI
     # mid-reply; all other speakers and crowd noise are ignored. Verification

@@ -194,6 +194,46 @@ def test_startup_assert_agc_failure_is_nonfatal(monkeypatch):
     assert "AGC" in printed                                          # loud warning
 
 
+def test_doa_probe_failure_warns_but_does_not_exit(monkeypatch):
+    # Sink resolve + AGC fine; DOAANGLE read raises -> startup must NOT exit
+    # (fail-open: the cone abstains; D10 behavior).
+    import kiosk
+
+    cfg = _config()
+    cfg["kiosk"]["talkback"]["turn_gate"] = {"doa": {"enabled": True}}
+    fake_dev = object()
+    monkeypatch.setattr("core.audio.respeaker.find", lambda: fake_dev)
+    monkeypatch.setattr("core.audio.respeaker.write_param",
+                        lambda dev, name, value: None)
+
+    def _read_param(dev, name):
+        raise RuntimeError("errno 13")
+    monkeypatch.setattr("core.audio.respeaker.read_param", _read_param)
+
+    console = MagicMock()
+    kiosk._assert_array_startup(cfg, console)        # no SystemExit
+    printed = " ".join(str(c) for c in console.print.call_args_list)
+    assert "DOA unavailable" in printed
+
+
+def test_doa_probe_success_prints_bearing(monkeypatch):
+    import kiosk
+
+    cfg = _config()
+    cfg["kiosk"]["talkback"]["turn_gate"] = {"doa": {"enabled": True}}
+    fake_dev = object()
+    monkeypatch.setattr("core.audio.respeaker.find", lambda: fake_dev)
+    monkeypatch.setattr("core.audio.respeaker.write_param",
+                        lambda dev, name, value: None)
+    monkeypatch.setattr("core.audio.respeaker.read_param",
+                        lambda dev, name: 143 if name == "DOAANGLE" else 0)
+
+    console = MagicMock()
+    kiosk._assert_array_startup(cfg, console)
+    printed = " ".join(str(c) for c in console.print.call_args_list)
+    assert "DOA control readable" in printed
+
+
 def test_startup_assert_null_output_device_skips_pin_check(monkeypatch):
     import sys as _sys
     import kiosk

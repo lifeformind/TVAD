@@ -196,6 +196,24 @@ def _calibrate_proximity_rms(first_segment, tb_cfg: dict) -> float:
     return thr
 
 
+def _calibrate_owner_bearing(doa_tracker, first_segment):
+    """Owner bearing from the wake utterance (Director-11). The handoff's
+    first_segment has no timestamps, so use a lookback window from 'now'
+    (assembly runs within moments of the wake endpoint) generously covering
+    the utterance; the tracker's speech-flag filter keeps only voiced
+    samples. None (no tracker / no samples) -> the cone abstains all session."""
+    if doa_tracker is None:
+        return None
+    dur_s = float(getattr(first_segment, "duration_ms", 0.0) or 0.0) / 1000.0
+    t_end = time.monotonic()
+    bearing = doa_tracker.median_between(t_end - (max(dur_s, 1.0) + 1.0), t_end)
+    if os.environ.get("TVAD_DIAG"):
+        shown = f"{bearing:.0f}°" if bearing is not None else "None (abstain)"
+        print(f"[DIAG assembly] owner bearing: {shown}",
+              file=sys.stderr, flush=True)
+    return bearing
+
+
 def _build_aec(tb_cfg: dict):
     aec_cfg = tb_cfg.get("aec", {})
     if not aec_cfg.get("enabled", False) or AecProcessor is None:
@@ -274,6 +292,7 @@ def build_director_runtime(
     clock: Callable[[], float] = time.monotonic,
     _out_stream: Optional[Any] = None,
     _watchdog_tick_s: float = 0.5,
+    doa_tracker: Optional[Any] = None,
 ) -> DirectorRuntimeFactory:
     """Construct a fully-wired Plan-02 DirectorRuntime from a DirectorHandoff.
 
@@ -286,6 +305,8 @@ def build_director_runtime(
         _out_stream: inject a fake OutputStream in tests; production opens a real
                      sounddevice OutputStream below.
         _watchdog_tick_s: watchdog cadence (small in tests for fast timeouts).
+        doa_tracker: Director-11 DoaTracker (already started/polling), or None
+                     to abstain from direction-of-arrival gating entirely.
     """
     tb_cfg = handoff.config or {}
     cfg = _director_config_from(tb_cfg)
@@ -297,7 +318,9 @@ def build_director_runtime(
     )
     proximity_rms = _calibrate_proximity_rms(handoff.first_segment, tb_cfg)
     now = clock()
-    director = Director(cfg, conversation, now=now, proximity_rms=proximity_rms)
+    owner_bearing = _calibrate_owner_bearing(doa_tracker, handoff.first_segment)
+    director = Director(cfg, conversation, now=now, proximity_rms=proximity_rms,
+                        owner_bearing=owner_bearing)
 
     aec = _build_aec(tb_cfg)
     turn_detector = _build_turn_detector()
@@ -328,6 +351,7 @@ def build_director_runtime(
         stt_worker=stt_worker, playback=playback, bus=bus, cfg=cfg,
         proximity_rms=proximity_rms, state_getter=lambda: director.state,
         score_fn=cosine_similarity, pvad=pvad, safety_worker=safety,
+        doa_tracker=doa_tracker,
     )
 
     vision = _build_vision(tb_cfg, bus=bus)
