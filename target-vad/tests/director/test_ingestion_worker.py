@@ -75,7 +75,8 @@ def _seg(duration_ms=900.0, level=0.5):
                          start_ms=0.0, end_ms=duration_ms, duration_ms=duration_ms)
 
 
-def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9, pvad=None, safety=None):
+def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9, pvad=None,
+                safety=None, doa_tracker=None):
     bus = EventBus()
     stt = MagicMock()
     stt.set_pending_user_audio = MagicMock()
@@ -94,6 +95,7 @@ def make_worker(mic, vad, state, turn_prob=0.9, embedder_score=0.9, pvad=None, s
         score_fn=lambda a, b: embedder_score,    # injected cosine (no real ECAPA)
         pvad=pvad,
         safety_worker=safety,
+        doa_tracker=doa_tracker,
     )
     return w, bus, stt
 
@@ -276,3 +278,79 @@ async def test_interjection_seq_matches_staging():
     assert len(inter) == 1 and inter[0].seq == 1
     assert safety.set_pending_audio.call_args[0][1] == 1
     assert stt.set_pending_interjection_audio.call_args[0][1] == 1
+
+
+class _FakeDoa:
+    """Records the median_between window; returns a scripted angle."""
+    def __init__(self, median=97.0, latest=None):
+        self._median = median
+        self._latest = latest          # (t, angle, speech) or None
+        self.windows = []
+
+    def latest(self):
+        return self._latest
+
+    def median_between(self, t0, t1):
+        self.windows.append((t0, t1))
+        return self._median
+
+
+@pytest.mark.asyncio
+async def test_segment_carries_doa_median_over_its_own_span():
+    seg = _seg(duration_ms=900.0)
+    doa = _FakeDoa(median=97.0)
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
+                              State.LISTENING, doa_tracker=doa)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
+    assert len(seps) == 1 and seps[0].doa_angle == 97.0
+    (t0, t1), = doa.windows
+    assert (t1 - t0) == pytest.approx(0.9, abs=0.05)   # the segment's own span
+
+
+@pytest.mark.asyncio
+async def test_interjection_carries_doa_median():
+    seg = _seg(duration_ms=900.0)
+    doa = _FakeDoa(median=193.0)
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
+                              State.EVALUATING, doa_tracker=doa)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    inters = [e for e in evs if isinstance(e, E.InterjectionSegment)]
+    assert len(inters) == 1 and inters[0].doa_angle == 193.0
+
+
+@pytest.mark.asyncio
+async def test_onset_carries_latest_speech_flagged_angle():
+    chunk = np.full(512, 0.5, dtype=np.float32)
+    doa = _FakeDoa(latest=(1.0, 140.0, 1))
+    w, bus, stt = make_worker(FakeMic([chunk]), FakeVad([[]], is_speaking=True),
+                              State.SPEAKING, doa_tracker=doa)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    onsets = [e for e in evs if isinstance(e, E.NearFieldOnset)]
+    assert len(onsets) == 1 and onsets[0].doa_angle == 140.0
+
+
+@pytest.mark.asyncio
+async def test_onset_nonspeech_latest_sample_stamps_none():
+    chunk = np.full(512, 0.5, dtype=np.float32)
+    doa = _FakeDoa(latest=(1.0, 140.0, 0))              # speech_flag = 0
+    w, bus, stt = make_worker(FakeMic([chunk]), FakeVad([[]], is_speaking=True),
+                              State.SPEAKING, doa_tracker=doa)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    onsets = [e for e in evs if isinstance(e, E.NearFieldOnset)]
+    assert len(onsets) == 1 and onsets[0].doa_angle is None
+
+
+@pytest.mark.asyncio
+async def test_no_tracker_stamps_none_everywhere():
+    seg = _seg()
+    w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
+                              State.LISTENING, doa_tracker=None)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
+    assert len(seps) == 1 and seps[0].doa_angle is None

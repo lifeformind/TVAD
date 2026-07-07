@@ -18,6 +18,7 @@ TranscribeUserTurn/TranscribeInterjection has the right buffer."""
 import asyncio
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -42,7 +43,7 @@ class IngestionWorker:
     def __init__(self, mic, vad, aec, turn_detector, embedder,
                  primary_embedding, stt_worker, playback, bus: EventBus,
                  cfg: DirectorConfig, proximity_rms: float, state_getter,
-                 score_fn, pvad=None, safety_worker=None):
+                 score_fn, pvad=None, safety_worker=None, doa_tracker=None):
         self._mic = mic
         self._vad = vad
         self._aec = aec
@@ -58,6 +59,7 @@ class IngestionWorker:
         self._score_fn = score_fn          # cosine(embedding, primary) -> float
         self._pvad = pvad                  # Plan 05 PvadWorker; None -> is_target=True
         self._safety = safety_worker       # Director-09 SafetyNetWorker; None -> no staging
+        self._doa = doa_tracker            # Director-11 DoaTracker; None -> doa_angle=None
         self._chunk_frames = []            # most recent chunk's pVAD SpeakerFrames
         self._seg_frames = []              # pVAD frames over the current voiced run
         self._running = False
@@ -144,6 +146,16 @@ class IngestionWorker:
         score = max(f.confidence for f in frames)
         return is_target, score
 
+    def _onset_doa(self):
+        """Latest DOA sample's angle IF it is speech-flagged, else None. The
+        onset is instantaneous, so only a current speech bearing counts."""
+        if self._doa is None:
+            return None
+        sample = self._doa.latest()
+        if sample is None or not sample[2]:
+            return None
+        return sample[1]
+
     def _apply_aec(self, chunk: np.ndarray, state: State) -> np.ndarray:
         """Per-frame AEC during playback (controller.py:819-832). Reads the
         reference ring the Playback worker fills; never records it here."""
@@ -173,9 +185,18 @@ class IngestionWorker:
         if rms >= self._proximity_rms:
             self._ducked_onset = True
             is_target, _ = self._target_from(self._chunk_frames)
-            await self._bus.emit(E.NearFieldOnset(rms=rms, is_target=is_target))
+            await self._bus.emit(E.NearFieldOnset(rms=rms, is_target=is_target,
+                                                  doa_angle=self._onset_doa()))
 
     async def _on_segment(self, seg, state: State) -> None:
+        # DOAANGLE tracks the CURRENT dominant sound, so the segment is scored
+        # over its own span from buffered samples: the VAD closed it just now,
+        # so [now - duration, now] is the voiced run (Director-11).
+        doa_angle = None
+        if self._doa is not None:
+            t_end = time.monotonic()
+            doa_angle = self._doa.median_between(
+                t_end - seg.duration_ms / 1000.0, t_end)
         rms = _rms(seg.audio)
         is_target, pvad_score = self._target_from(self._seg_frames)
         self._seg_frames = []                            # consume the run
@@ -193,6 +214,7 @@ class IngestionWorker:
             await self._bus.emit(E.SegmentEndpointed(
                 duration_ms=seg.duration_ms, rms=rms,
                 is_target=is_target, endpoint_prob=prob, seq=seq,
+                doa_angle=doa_angle,
             ))
         elif state is State.EVALUATING:
             # pVAD confidence is the primary speaker_score; ECAPA (off the hot
@@ -205,6 +227,7 @@ class IngestionWorker:
             await self._bus.emit(E.InterjectionSegment(
                 duration_ms=seg.duration_ms, rms=rms,
                 is_target=is_target, speaker_score=score, seq=seq,
+                doa_angle=doa_angle,
             ))
         # SPEAKING/THINKING/IDLE: onset handled separately; segments are ignored.
 
