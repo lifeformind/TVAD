@@ -194,6 +194,37 @@ async def test_far_onset_below_proximity_does_not_emit():
     assert bus.qsize() == 0
 
 
+class _FlippingVad(FakeVad):
+    """FakeVad whose is_speaking flips per chunk, popped from a queue inside
+    process_chunk (mirrors the real VAD: is_speaking tracks the run and can go
+    False between two runs of the same SPEAKING state)."""
+    def __init__(self, is_speaking_sequence):
+        super().__init__([[] for _ in is_speaking_sequence])
+        self._is_speaking_seq = list(is_speaking_sequence)
+
+    def process_chunk(self, chunk):
+        segs = super().process_chunk(chunk)
+        self.is_speaking = self._is_speaking_seq.pop(0)
+        return segs
+
+
+@pytest.mark.asyncio
+async def test_onset_latch_rearms_after_speech_run_ends_same_state():
+    # Director-11: a suppressed (out-of-cone) onset leaves state at SPEAKING
+    # (no Duck), so the old "reset only on leaving SPEAKING" latch would never
+    # re-arm and the owner's next barge-in in the same reply would be silent.
+    # Once-per-speech-RUN semantics: chunk 1 speaking -> onset #1; chunk 2 the
+    # run ends (is_speaking False, no onset); chunk 3 a new run starts while
+    # state is STILL SPEAKING -> onset #2 must fire.
+    loud = np.full(512, 0.5, dtype=np.float32)
+    vad = _FlippingVad([True, False, True])
+    w, bus, stt = make_worker(FakeMic([loud, loud, loud]), vad, State.SPEAKING)
+    await _run_briefly(w)
+    evs = [await bus.get() for _ in range(bus.qsize())]
+    onsets = [e for e in evs if isinstance(e, E.NearFieldOnset)]
+    assert len(onsets) == 2
+
+
 @pytest.mark.asyncio
 async def test_apply_aec_uses_real_playback_worker_reference(monkeypatch):
     """Regression: the ingestion AEC path (state==SPEAKING) calls

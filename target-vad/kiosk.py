@@ -145,6 +145,11 @@ class _LazyDirectorRuntime:
         self._logger = logger
         self._doa_tracker = doa_tracker
 
+    def set_doa_tracker(self, tracker) -> None:
+        """Late-bind the DoaTracker: it's constructed AFTER _build_runtime (needs
+        _assert_array_startup to have run first), so __init__ can't take it."""
+        self._doa_tracker = tracker
+
     def run(self, handoff):
         from modes.director.assembly import build_director_runtime
         tb_cfg = self._config["kiosk"].get("talkback", {})
@@ -252,7 +257,7 @@ def main():
         from core.audio.doa_tracker import DoaTracker
         doa_tracker = DoaTracker(poll_s=float(doa_cfg.get("poll_ms", 150)) / 1000.0)
         doa_tracker.start()          # unavailable -> logs once, reads return None
-        runtime._doa_tracker = doa_tracker
+        runtime.set_doa_tracker(doa_tracker)
 
     console.print(
         f"[bold][TALKBACK][/] Listening for "

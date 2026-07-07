@@ -179,7 +179,11 @@ class IngestionWorker:
         if state is not State.SPEAKING:
             self._ducked_onset = False
             return
-        if self._ducked_onset or getattr(self._vad, "is_speaking", False) is not True:
+        if getattr(self._vad, "is_speaking", False) is not True:
+            self._ducked_onset = False   # speech run ended: re-arm — one onset
+            return                       # PER RUN, so a suppressed (out-of-cone)
+                                         # onset can't starve the owner's next one
+        if self._ducked_onset:
             return
         rms = _rms(chunk)
         if rms >= self._proximity_rms:
