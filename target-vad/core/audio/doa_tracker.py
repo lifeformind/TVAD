@@ -93,10 +93,23 @@ class DoaTracker:
         with self._lock:
             return self._samples[-1] if self._samples else None
 
-    def median_between(self, t0: float, t1: float):
-        """Circular median of speech-flagged angles in [t0, t1], or None."""
+    def angles_between(self, t0: float, t1: float):
+        """Speech-flagged angles in [t0, t1] as a tuple, or None if the
+        tracker is unavailable. Empty tuple = window had no speech samples;
+        both falsy cases mean the cone gate abstains. The raw samples (not a
+        pre-chewed median) let the reducer vote by in-cone FRACTION — with
+        continuous background speech the VAD merges the owner's utterance
+        into a bystander-dominated segment, and a duration-majority median
+        votes the bystander (live 2026-07-07 18:42: owner's speech inside
+        podcast-merged segments got REJECT=out_of_cone)."""
         if not self._available:
             return None
         with self._lock:
-            angles = [a for (t, a, s) in self._samples if t0 <= t <= t1 and s]
+            return tuple(a for (t, a, s) in self._samples if t0 <= t <= t1 and s)
+
+    def median_between(self, t0: float, t1: float):
+        """Circular median of speech-flagged angles in [t0, t1], or None.
+        Used for the session-start bearing calibration (single dominant
+        source: the wake utterance)."""
+        angles = self.angles_between(t0, t1)
         return circular_median(angles) if angles else None

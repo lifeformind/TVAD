@@ -312,44 +312,44 @@ async def test_interjection_seq_matches_staging():
 
 
 class _FakeDoa:
-    """Records the median_between window; returns a scripted angle."""
-    def __init__(self, median=97.0, latest=None):
-        self._median = median
+    """Records the angles_between window; returns scripted angles."""
+    def __init__(self, angles=(97.0,), latest=None):
+        self._angles = tuple(angles)
         self._latest = latest          # (t, angle, speech) or None
         self.windows = []
 
     def latest(self):
         return self._latest
 
-    def median_between(self, t0, t1):
+    def angles_between(self, t0, t1):
         self.windows.append((t0, t1))
-        return self._median
+        return self._angles
 
 
 @pytest.mark.asyncio
-async def test_segment_carries_doa_median_over_its_own_span():
+async def test_segment_carries_doa_samples_over_its_own_span():
     seg = _seg(duration_ms=900.0)
-    doa = _FakeDoa(median=97.0)
+    doa = _FakeDoa(angles=(97.0, 95.0))
     w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
                               State.LISTENING, doa_tracker=doa)
     await _run_briefly(w)
     evs = [await bus.get() for _ in range(bus.qsize())]
     seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
-    assert len(seps) == 1 and seps[0].doa_angle == 97.0
+    assert len(seps) == 1 and seps[0].doa_angles == (97.0, 95.0)
     (t0, t1), = doa.windows
     assert (t1 - t0) == pytest.approx(0.9, abs=0.05)   # the segment's own span
 
 
 @pytest.mark.asyncio
-async def test_interjection_carries_doa_median():
+async def test_interjection_carries_doa_samples():
     seg = _seg(duration_ms=900.0)
-    doa = _FakeDoa(median=193.0)
+    doa = _FakeDoa(angles=(193.0, 195.0))
     w, bus, stt = make_worker(FakeMic([seg.audio]), FakeVad([[seg]], is_speaking=True),
                               State.EVALUATING, doa_tracker=doa)
     await _run_briefly(w)
     evs = [await bus.get() for _ in range(bus.qsize())]
     inters = [e for e in evs if isinstance(e, E.InterjectionSegment)]
-    assert len(inters) == 1 and inters[0].doa_angle == 193.0
+    assert len(inters) == 1 and inters[0].doa_angles == (193.0, 195.0)
 
 
 @pytest.mark.asyncio
@@ -384,4 +384,4 @@ async def test_no_tracker_stamps_none_everywhere():
     await _run_briefly(w)
     evs = [await bus.get() for _ in range(bus.qsize())]
     seps = [e for e in evs if isinstance(e, E.SegmentEndpointed)]
-    assert len(seps) == 1 and seps[0].doa_angle is None
+    assert len(seps) == 1 and seps[0].doa_angles is None

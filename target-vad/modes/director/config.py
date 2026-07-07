@@ -33,3 +33,10 @@ class DirectorConfig:
     # tracker construction, and no tracker means every doa_angle is None.
     doa_cone_deg: float = 20.0           # cone half-width, degrees (spike-validated)
     doa_bearing_ema_alpha: float = 0.3   # served-turn bearing tracking rate
+    # Segment vote is by in-cone FRACTION, not median: with continuous
+    # background speech the VAD merges the owner's utterance into a
+    # bystander-dominated segment and a duration-majority median votes the
+    # bystander (live 2026-07-07). "Did the owner speak during this segment"
+    # = enough samples point at them, not "who spoke most".
+    doa_min_in_cone_fraction: float = 0.25   # >= this share of samples in-cone
+    doa_min_in_cone_samples: int = 3         # AND >= this many (~450ms at 150ms polls)

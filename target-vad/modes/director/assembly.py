@@ -173,6 +173,10 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
                                  .get("cone_deg", 20.0)),
         doa_bearing_ema_alpha=float(tb_cfg.get("turn_gate", {}).get("doa", {})
                                           .get("bearing_ema_alpha", 0.3)),
+        doa_min_in_cone_fraction=float(tb_cfg.get("turn_gate", {}).get("doa", {})
+                                             .get("min_in_cone_fraction", 0.25)),
+        doa_min_in_cone_samples=int(tb_cfg.get("turn_gate", {}).get("doa", {})
+                                          .get("min_in_cone_samples", 3)),
     )
 
 
@@ -189,9 +193,19 @@ def _calibrate_proximity_rms(first_segment, tb_cfg: dict) -> float:
             if audio is not None and len(audio) else 0.0
         )
         thr = primary_rms * prox.get("rms_factor", 0.5)
+        # Cap: wake phrases run hot (seeds measured 0.085-0.21 across sessions,
+        # a 2.5x swing), and a shouted wake prices the owner's NORMAL voice out
+        # of its own session (live 2026-07-07 18:42: floor 0.105 ate owner turns
+        # at 0.04-0.10). AGC is asserted off, so an absolute cap is stable; the
+        # DOA cone now does the bystander work the floor was over-stretched for.
+        cap = prox.get("max_floor")
+        capped = cap is not None and thr > cap
+        if capped:
+            thr = float(cap)
         if _DIAG:
+            note = " (capped by max_floor)" if capped else ""
             print(f"[DIAG assembly] proximity floor: seed_rms={primary_rms:.4f} "
-                  f"x factor={prox.get('rms_factor', 0.5)} = {thr:.4f}",
+                  f"x factor={prox.get('rms_factor', 0.5)} = {thr:.4f}{note}",
                   file=sys.stderr, flush=True)
     return thr
 

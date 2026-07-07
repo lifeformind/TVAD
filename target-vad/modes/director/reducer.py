@@ -11,7 +11,7 @@ from modes.director import events as E
 from modes.director import commands as C
 from modes.director.events import PresenceStatus
 from modes.talkback.intent import Interjection, classify_interjection
-from core.audio.doa_math import circular_distance, circular_ema
+from core.audio.doa_math import circular_distance, circular_ema, circular_median
 
 
 def silence_duration(state: State, ctx: Context) -> float:
@@ -134,11 +134,45 @@ class TurnVerdict(enum.Enum):
 
 
 def in_owner_cone(ctx: Context, doa_angle):
-    """Direction vote (Director-11): None = abstain (no signal — fail open,
-    the other gates decide), True = within the cone, False = out of cone."""
+    """Scalar direction vote (Director-11), used by the duck-at-onset reflex:
+    None = abstain (no signal — fail open, the other gates decide), True =
+    within the cone, False = out of cone."""
     if doa_angle is None or ctx.owner_bearing is None:
         return None
     return circular_distance(doa_angle, ctx.owner_bearing) <= ctx.cfg.doa_cone_deg
+
+
+def _in_cone_samples(ctx: Context, doa_angles) -> list:
+    return [a for a in doa_angles
+            if circular_distance(a, ctx.owner_bearing) <= ctx.cfg.doa_cone_deg]
+
+
+def cone_vote(ctx: Context, doa_angles):
+    """Segment direction vote (Director-11): did the OWNER speak during this
+    segment — NOT who spoke most. With continuous background speech the VAD
+    merges the owner's utterance into a bystander-dominated segment, so a
+    duration-majority median votes the bystander and rejects the owner (live
+    2026-07-07 18:42). Pass if enough speech-flagged samples point at the
+    owner: >= min_in_cone_samples AND >= min_in_cone_fraction of the segment.
+    None = abstain (no samples / no bearing — fail open)."""
+    if not doa_angles or ctx.owner_bearing is None:
+        return None
+    hits = _in_cone_samples(ctx, doa_angles)
+    return (len(hits) >= ctx.cfg.doa_min_in_cone_samples
+            and len(hits) / len(doa_angles) >= ctx.cfg.doa_min_in_cone_fraction)
+
+
+def cone_diag(ctx: Context, doa_angles) -> str:
+    """DIAG-only: the cone vote's inputs, so a live REJECT line shows WHY.
+    Pure — the runtime prints."""
+    if ctx.owner_bearing is None:
+        return "doa=[no bearing]"
+    if not doa_angles:
+        return f"doa=[n=0] bearing={ctx.owner_bearing:.0f}°"
+    hits = _in_cone_samples(ctx, doa_angles)
+    return (f"doa=[n={len(doa_angles)} in_cone={len(hits)} "
+            f"med={circular_median(doa_angles):.0f}°] "
+            f"bearing={ctx.owner_bearing:.0f}°")
 
 
 def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
@@ -157,7 +191,7 @@ def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
         return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
     if ev.rms < ctx.proximity_rms:
         return TurnVerdict.REJECT_TOO_QUIET
-    if in_owner_cone(ctx, ev.doa_angle) is False:
+    if cone_vote(ctx, ev.doa_angles) is False:
         return TurnVerdict.REJECT_OUT_OF_CONE
     if ctx.presence_status is PresenceStatus.ABSENT:
         return TurnVerdict.REJECT_OWNER_ABSENT
@@ -211,9 +245,13 @@ def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
         cmds = [C.AccumulateSpeakerAudio(seq=ev.seq)]
         if v is TurnVerdict.ACCEPT:
             cmds.append(C.TranscribeUserTurn(seq=ev.seq))
-            if in_owner_cone(ctx, ev.doa_angle) is True:
+            if cone_vote(ctx, ev.doa_angles) is True:
+                # Track toward the median of the IN-CONE samples only — a
+                # served mixed segment must not drag the bearing toward the
+                # bystander's share of it.
                 ctx.owner_bearing = circular_ema(
-                    ctx.owner_bearing, ev.doa_angle,
+                    ctx.owner_bearing,
+                    circular_median(_in_cone_samples(ctx, ev.doa_angles)),
                     ctx.cfg.doa_bearing_ema_alpha)
         return State.LISTENING, cmds
     # Rejected. Legacy mode (reject_bystanders off) keeps its historical clock
@@ -255,7 +293,7 @@ def _on_interjection_segment(ctx: Context, ev: E.InterjectionSegment) -> tuple:
     # Reject ladder (spec s6) — NEVER cut on these; always RESTORE.
     if ev.rms < ctx.proximity_rms:                       # proximity pre-gate
         return _restore_speaking(ctx)
-    if in_owner_cone(ctx, ev.doa_angle) is False:        # wrong direction (Director-11)
+    if cone_vote(ctx, ev.doa_angles) is False:           # wrong direction (Director-11)
         return _restore_speaking(ctx)
     if ev.duration_ms < ctx.cfg.verify_window_ms:        # too short to verify
         return _restore_speaking(ctx)

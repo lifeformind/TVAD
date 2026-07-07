@@ -26,9 +26,12 @@ def test_mapping_malformed_value_is_false():
 def test_doa_keys_map_from_turn_gate_doa():
     from modes.director.assembly import _director_config_from
     cfg = _director_config_from({"turn_gate": {"doa": {
-        "cone_deg": 25, "bearing_ema_alpha": 0.5}}})
+        "cone_deg": 25, "bearing_ema_alpha": 0.5,
+        "min_in_cone_fraction": 0.4, "min_in_cone_samples": 5}}})
     assert cfg.doa_cone_deg == 25.0
     assert cfg.doa_bearing_ema_alpha == 0.5
+    assert cfg.doa_min_in_cone_fraction == 0.4
+    assert cfg.doa_min_in_cone_samples == 5
 
 
 def test_doa_keys_default_when_absent():
@@ -36,3 +39,5 @@ def test_doa_keys_default_when_absent():
     cfg = _director_config_from({})
     assert cfg.doa_cone_deg == 20.0
     assert cfg.doa_bearing_ema_alpha == 0.3
+    assert cfg.doa_min_in_cone_fraction == 0.25
+    assert cfg.doa_min_in_cone_samples == 3

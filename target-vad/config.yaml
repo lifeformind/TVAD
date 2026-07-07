@@ -163,6 +163,14 @@ kiosk:
         cone_deg: 20             # half-width; ±20° scored 100% on the 2026-07-06 spike
         poll_ms: 150             # firmware update cadence
         bearing_ema_alpha: 0.3   # served-turn bearing tracking rate
+        # Segment vote = in-cone FRACTION, not median: continuous background
+        # speech makes the VAD merge the owner's utterance into a bystander-
+        # dominated segment, and a duration-majority median votes the bystander
+        # (2026-07-07 live: owner rejected out_of_cone while the LED saw them).
+        # Pass = enough samples point at the owner: "did the owner speak during
+        # this segment", not "who spoke most".
+        min_in_cone_fraction: 0.25   # >= this share of the segment's speech samples
+        min_in_cone_samples: 3       # AND >= this many (~450ms at 150ms polls)
 
     # Barge-in: the registered user (session primary) can interrupt the AI
     # mid-reply; all other speakers and crowd noise are ignored. Verification
@@ -186,6 +194,12 @@ kiosk:
         enabled: true              # ignore speech too quiet to be someone at the kiosk
         rms_threshold: null        # null = auto-calibrate from the primary enrollment RMS
         rms_factor: 0.5
+        max_floor: 0.05            # cap on the calibrated floor: wake phrases run hot
+                                   # (seeds 0.085-0.21 across sessions) and a shouted wake
+                                   # priced the owner's normal voice (0.04-0.10) out of its
+                                   # own session (2026-07-07). AGC off = stable substrate,
+                                   # so an absolute cap holds; the DOA cone does the
+                                   # bystander work the floor was over-stretched for.
 
     # Crowd focus (Plan 05): DISABLED — the FireRedChat pVAD's spkemb conditioning
     # is inert with our speechbrain/spkrec-ecapa-voxceleb embeddings, so it provides

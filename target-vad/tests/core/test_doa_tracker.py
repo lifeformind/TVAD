@@ -81,6 +81,9 @@ def test_median_between_filters_time_and_speech_flag():
     assert t.median_between(0.5, 1.5) == 90.0
     # window with no qualifying samples
     assert t.median_between(10.0, 20.0) is None
+    # raw-sample access (Director-11 fraction vote): same filters, tuple out
+    assert t.angles_between(2.0, 4.0) == (100.0, 95.0)
+    assert t.angles_between(10.0, 20.0) == ()
 
 
 def test_read_error_latches_unavailable_forever():
@@ -95,6 +98,7 @@ def test_read_error_latches_unavailable_forever():
     assert t.available is False
     assert t.latest() is None                  # even though a sample exists
     assert t.median_between(0.0, 9.0) is None
+    assert t.angles_between(0.0, 9.0) is None
 
 
 def test_thread_lifecycle_samples_and_stops():

@@ -196,10 +196,10 @@ class IngestionWorker:
         # DOAANGLE tracks the CURRENT dominant sound, so the segment is scored
         # over its own span from buffered samples: the VAD closed it just now,
         # so [now - duration, now] is the voiced run (Director-11).
-        doa_angle = None
+        doa_angles = None
         if self._doa is not None:
             t_end = time.monotonic()
-            doa_angle = self._doa.median_between(
+            doa_angles = self._doa.angles_between(
                 t_end - seg.duration_ms / 1000.0, t_end)
         rms = _rms(seg.audio)
         is_target, pvad_score = self._target_from(self._seg_frames)
@@ -218,7 +218,7 @@ class IngestionWorker:
             await self._bus.emit(E.SegmentEndpointed(
                 duration_ms=seg.duration_ms, rms=rms,
                 is_target=is_target, endpoint_prob=prob, seq=seq,
-                doa_angle=doa_angle,
+                doa_angles=doa_angles,
             ))
         elif state is State.EVALUATING:
             # pVAD confidence is the primary speaker_score; ECAPA (off the hot
@@ -231,7 +231,7 @@ class IngestionWorker:
             await self._bus.emit(E.InterjectionSegment(
                 duration_ms=seg.duration_ms, rms=rms,
                 is_target=is_target, speaker_score=score, seq=seq,
-                doa_angle=doa_angle,
+                doa_angles=doa_angles,
             ))
         # SPEAKING/THINKING/IDLE: onset handled separately; segments are ignored.
 

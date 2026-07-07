@@ -27,7 +27,7 @@ class SegmentEndpointed:
     # the consuming commands so a command can never grab a LATER segment's
     # staged audio (overwrite-last race). 0 = the assembly-seeded first segment.
     seq: int = 0
-    doa_angle: "float | None" = None   # circular median over the segment span (Director-11); None = no signal
+    doa_angles: "tuple | None" = None  # speech-flagged DOA samples over the segment span (Director-11); None/empty = no signal
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class InterjectionSegment:
     is_target: bool
     speaker_score: float             # ECAPA/pVAD score vs primary (off hot path)
     seq: int = 0                     # staging sequence (see SegmentEndpointed)
-    doa_angle: "float | None" = None   # circular median over the segment span (Director-11)
+    doa_angles: "tuple | None" = None  # speech-flagged DOA samples over the segment span (Director-11)
 
 
 @dataclass(frozen=True)

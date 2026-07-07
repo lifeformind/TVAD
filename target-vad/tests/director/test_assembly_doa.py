@@ -52,3 +52,29 @@ def test_tracker_with_no_samples_returns_none():
         def median_between(self, t0, t1):
             return None
     assert _calibrate_owner_bearing(_Empty(), _first_segment()) is None
+
+
+# ---- proximity floor cap (2026-07-07 live: shouted wake -> floor 0.105 ate
+# the owner's normal 0.04-0.10 voice; AGC is off so an absolute cap is stable) ----
+
+def _loud_seed(rms=0.2, n=8000):
+    import numpy as np
+    return SimpleNamespace(audio=np.full(n, rms, dtype=np.float32))
+
+
+def test_floor_capped_by_max_floor():
+    from modes.director.assembly import _calibrate_proximity_rms
+    cfg = {"barge_in": {"proximity": {"rms_factor": 0.5, "max_floor": 0.05}}}
+    assert _calibrate_proximity_rms(_loud_seed(rms=0.2), cfg) == pytest.approx(0.05)
+
+
+def test_floor_below_cap_unchanged():
+    from modes.director.assembly import _calibrate_proximity_rms
+    cfg = {"barge_in": {"proximity": {"rms_factor": 0.5, "max_floor": 0.05}}}
+    assert _calibrate_proximity_rms(_loud_seed(rms=0.06), cfg) == pytest.approx(0.03)
+
+
+def test_no_cap_configured_keeps_legacy_floor():
+    from modes.director.assembly import _calibrate_proximity_rms
+    cfg = {"barge_in": {"proximity": {"rms_factor": 0.5}}}
+    assert _calibrate_proximity_rms(_loud_seed(rms=0.2), cfg) == pytest.approx(0.1)
