@@ -127,18 +127,23 @@ class TurnVerdict(enum.Enum):
     REJECT_NOT_TARGET = "not_target"        # pVAD bystander
     REJECT_TOO_QUIET = "too_quiet"          # below proximity floor (distant bystander)
     REJECT_OWNER_ABSENT = "owner_absent_frame"  # owner not in camera frame
+    REJECT_SPEAKER_UNVERIFIED = "speaker_unverified"  # safety-net streak active
 
 
 def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
     """Pure verdict for a LISTENING SegmentEndpointed. Single source of truth for the
     reducer (decide) and the runtime (DIAG). reject_bystanders off -> legacy verdict."""
     complete = ev.endpoint_prob >= ctx.cfg.endpoint_threshold
-    if not ctx.cfg.reject_bystanders:
-        if not ev.is_target:
-            return TurnVerdict.REJECT_NOT_TARGET
-        return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
     if not ev.is_target:
         return TurnVerdict.REJECT_NOT_TARGET
+    # Loud-bystander suspension (2026-07-07 live): a podcast's rms overlapped the
+    # owner's seed, so the proximity floor can't separate them — but the ECAPA
+    # windows do. While the safety net's miss streak is active, nothing is served
+    # until one passing window (the owner speaking) resets it.
+    if ctx.cfg.lockout_enabled and ctx.miss_streak >= 2:
+        return TurnVerdict.REJECT_SPEAKER_UNVERIFIED
+    if not ctx.cfg.reject_bystanders:
+        return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
     if ev.rms < ctx.proximity_rms:
         return TurnVerdict.REJECT_TOO_QUIET
     if ctx.presence_status is PresenceStatus.ABSENT:
@@ -151,7 +156,7 @@ def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
     still accumulating. None for non-reject verdicts keeps the log quiet."""
     v = classify_new_turn(ctx, ev)
     if v in (TurnVerdict.REJECT_NOT_TARGET, TurnVerdict.REJECT_TOO_QUIET,
-             TurnVerdict.REJECT_OWNER_ABSENT):
+             TurnVerdict.REJECT_OWNER_ABSENT, TurnVerdict.REJECT_SPEAKER_UNVERIFIED):
         return v.value
     return None
 
@@ -179,6 +184,11 @@ def safety_diag_line(ctx: Context, ev, commands) -> str:
 
 def _on_user_segment(ctx: Context, ev: E.SegmentEndpointed) -> tuple:
     v = classify_new_turn(ctx, ev)
+    if v is TurnVerdict.REJECT_SPEAKER_UNVERIFIED:
+        # Suspended, not ejected: keep feeding the verifier so the owner's next
+        # utterance can unlock, but never serve and never reset the silence
+        # clock — a podcast must not hold the session open.
+        return State.LISTENING, [C.AccumulateSpeakerAudio(seq=ev.seq)]
     if v in (TurnVerdict.ACCEPT, TurnVerdict.ACCUMULATE):
         # Plausibly-owner speech: reset the silence clock and feed the safety
         # net (Director-09) — only served speech reaches the hijack buffer, so
