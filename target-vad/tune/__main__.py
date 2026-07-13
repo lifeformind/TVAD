@@ -14,6 +14,18 @@ def _sigterm(signum, frame):
     raise SystemExit(0)
 
 
+LOCAL_LIB = os.path.expanduser("~/.local/lib")
+
+
+def ensure_local_lib_path(environ=os.environ):
+    """Mirror kiosk-stack.sh's LD_LIBRARY_PATH export: PortAudio lives in
+    ~/.local/lib on this box, so a kiosk spawned from a bare `python3 -m tune`
+    can't import sounddevice without it (live 2026-07-13)."""
+    parts = environ.get("LD_LIBRARY_PATH", "")
+    if LOCAL_LIB not in parts.split(":"):
+        environ["LD_LIBRARY_PATH"] = f"{LOCAL_LIB}:{parts}" if parts else LOCAL_LIB
+
+
 def start_kiosk_if_requested(kproc, requested, out=print):
     """Best-effort auto-start (kiosk-stack.sh tune / --start-kiosk): a refusal
     (foreign kiosk already running) must not kill the console — the browser's
@@ -39,6 +51,7 @@ def main():
     args = ap.parse_args()
 
     config_path = os.path.abspath(args.config)
+    ensure_local_lib_path()   # the kiosk child inherits our environment
     kproc = KioskProcess(cwd=os.path.dirname(config_path))
     server = TuningServer(config_path=config_path, kproc=kproc,
                           host=args.host, port=args.port)

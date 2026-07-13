@@ -2,7 +2,7 @@
 (foreign kiosk already running, double start) must be reported, not raised,
 so the console still comes up and the browser's Start button stays usable."""
 
-from tune.__main__ import start_kiosk_if_requested
+from tune.__main__ import LOCAL_LIB, ensure_local_lib_path, start_kiosk_if_requested
 from tune.kiosk_proc import KioskProcess
 
 
@@ -37,3 +37,25 @@ def test_refusal_is_reported_not_raised():
     start_kiosk_if_requested(p, True, out=out.append)  # must not raise
     assert p.status()["running"] is False
     assert any("4242" in line for line in out)
+
+
+# ---- LD_LIBRARY_PATH (PortAudio lives in ~/.local/lib on this box;
+# live 2026-07-13: a bare `python3 -m tune` spawned a kiosk that couldn't
+# import sounddevice) ----
+
+def test_local_lib_added_when_var_unset():
+    env = {}
+    ensure_local_lib_path(env)
+    assert env["LD_LIBRARY_PATH"] == LOCAL_LIB
+
+
+def test_local_lib_prepended_to_existing_paths():
+    env = {"LD_LIBRARY_PATH": "/opt/cuda/lib"}
+    ensure_local_lib_path(env)
+    assert env["LD_LIBRARY_PATH"] == f"{LOCAL_LIB}:/opt/cuda/lib"
+
+
+def test_local_lib_not_duplicated():
+    env = {"LD_LIBRARY_PATH": f"{LOCAL_LIB}:/opt/cuda/lib"}
+    ensure_local_lib_path(env)
+    assert env["LD_LIBRARY_PATH"] == f"{LOCAL_LIB}:/opt/cuda/lib"
