@@ -143,3 +143,21 @@ def test_unknown_route_404s_with_json(srv):
     server, cfg = srv
     status, out = _req(server, "GET", "/api/nope")
     assert status == 404 and "error" in out
+
+
+def test_unexpected_error_returns_500_json(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    shutil.copy(REAL_CONFIG, cfg)
+
+    def boom():
+        raise RuntimeError("boom")
+
+    kproc = KioskProcess(cmd=["bash", "-c", "sleep 30"], foreign_pids=boom)
+    server = TuningServer(config_path=str(cfg), kproc=kproc, port=0)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        status, out = _req(server, "POST", "/api/kiosk/start", {"diag": False})
+        assert status == 500 and "boom" in out["error"]
+    finally:
+        server.shutdown()

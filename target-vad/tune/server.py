@@ -82,6 +82,24 @@ class TuningServer:
                 self.wfile.write(body)
 
             def do_GET(self):
+                self._safely(self._route_get)
+
+            def do_POST(self):
+                self._safely(self._route_post)
+
+            def _safely(self, route):
+                try:
+                    route()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # client went away; nothing to answer
+                except Exception as e:  # noqa: BLE001 — last-resort 500
+                    try:
+                        self._json(500, {
+                            "error": f"internal error: {type(e).__name__}: {e}"})
+                    except Exception:
+                        pass  # headers already sent (e.g. mid-SSE); connection is lost anyway
+
+            def _route_get(self):
                 if self.path == "/":
                     return self._index()
                 if self.path == "/api/state":
@@ -90,7 +108,7 @@ class TuningServer:
                     return self._sse()
                 self._json(404, {"error": f"no route: {self.path}"})
 
-            def do_POST(self):
+            def _route_post(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 try:
                     body = json.loads(self.rfile.read(n) or b"null")
