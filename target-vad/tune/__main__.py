@@ -2,9 +2,15 @@
 
 import argparse
 import os
+import signal
 
 from tune.kiosk_proc import KioskProcess
 from tune.server import TuningServer
+
+
+def _sigterm(signum, frame):
+    """SIGTERM must run the same cleanup as Ctrl-C — never orphan a kiosk."""
+    raise SystemExit(0)
 
 
 def main():
@@ -21,6 +27,7 @@ def main():
                           host=args.host, port=args.port)
     print(f"[tune] console at http://{args.host}:{server.port}/  "
           f"(config: {config_path})")
+    signal.signal(signal.SIGTERM, _sigterm)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

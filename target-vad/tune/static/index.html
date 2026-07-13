@@ -130,7 +130,10 @@ function control(k, cur) {
     num.type = "number"; num.min = k.min; num.max = k.max; num.step = k.step;
     const sync = v => { slider.value = v; num.value = v; };
     slider.oninput = () => { sync(slider.value); set(Number(slider.value)); };
-    num.oninput = () => { sync(num.value); set(Number(num.value)); };
+    num.oninput = () => {
+      if (num.value === "") return;   // mid-edit blank: keep last valid value
+      sync(num.value); set(Number(num.value));
+    };
     let auto = null;
     if (k.nullable) {
       auto = document.createElement("label");

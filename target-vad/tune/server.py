@@ -209,6 +209,7 @@ class TuningServer:
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(text)
+            os.chmod(tmp, os.stat(self.config_path).st_mode & 0o777)
             os.replace(tmp, self.config_path)
         except BaseException:
             if os.path.exists(tmp):

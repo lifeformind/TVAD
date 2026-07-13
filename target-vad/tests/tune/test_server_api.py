@@ -4,6 +4,7 @@ boundary: hand-crafted bad POSTs must be rejected server-side."""
 
 import http.client
 import json
+import os
 import shutil
 import socket
 import threading
@@ -175,3 +176,18 @@ def test_index_served_with_expected_ui_hooks(srv):
                  "id=\"logpane\"", "/api/state", "/api/save", "/api/logs",
                  "/api/kiosk/"):
         assert hook in body, hook
+
+
+def test_save_preserves_file_mode(srv):
+    server, cfg = srv
+    os.chmod(cfg, 0o664)
+    status, _ = _req(server, "POST", "/api/save", {
+        "changes": {"kiosk.talkback.turn_gate.doa.cone_deg": 25.0}})
+    assert status == 200
+    assert (cfg.stat().st_mode & 0o777) == 0o664
+
+
+def test_sigterm_handler_raises_systemexit():
+    from tune.__main__ import _sigterm
+    with pytest.raises(SystemExit):
+        _sigterm(15, None)
