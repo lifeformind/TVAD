@@ -886,6 +886,9 @@ def test_diag_env_reaches_the_child():
 def test_restart_reuses_last_diag_flag():
     p = _proc('echo "diag=${TVAD_DIAG:-unset}"; sleep 30')
     p.start(diag=True)
+    # synchronize BEFORE the destructive call (same pattern as the
+    # TERM-escalation test): restart() must not race the first echo
+    assert _wait(lambda: any("diag=1" in l for l in p.attach()[0]))
     p.restart()
     try:
         assert p.status() == {"running": True, "pid": p.status()["pid"], "diag": True}
