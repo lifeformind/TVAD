@@ -54,7 +54,6 @@ class KioskProcess:
         self._ring: collections.deque[str] = collections.deque(maxlen=ring_size)
         self._subs: list[queue.Queue] = []
         self._diag = False
-        self._pump_started: threading.Event | None = None
 
     # ---- lifecycle ----
 
@@ -79,13 +78,10 @@ class KioskProcess:
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, errors="replace", bufsize=1)
             self._diag = diag
-            self._pump_started = threading.Event()
             self._reader = threading.Thread(
                 target=self._pump, args=(self._proc,),
                 name="kiosk-pump", daemon=True)
             self._reader.start()
-        # Wait for pump to start reading (outside lock to avoid blocking other threads)
-        self._pump_started.wait(timeout=5.0)
 
     def stop(self) -> None:
         with self._lock:
@@ -143,11 +139,7 @@ class KioskProcess:
                 pass  # slow client: it still has the ring on reconnect
 
     def _pump(self, proc: subprocess.Popen) -> None:
-        first_line = True
         for raw in proc.stdout:
             self._emit(_ANSI_RE.sub("", raw.rstrip("\n")))
-            if first_line and self._pump_started:
-                self._pump_started.set()
-                first_line = False
         code = proc.wait()
         self._emit(f"[tune] kiosk exited (code {code})")
