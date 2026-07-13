@@ -82,7 +82,7 @@ def test_int_edit(text):
 
 def test_strict_bool_renders_literal_true_false(text):
     edited = set_values(text, {"kiosk.talkback.turn_gate.reject_bystanders": False})
-    line = [l for l in edited.split("\n") if "reject_bystanders" in l][0]
+    line = [l for l in edited.split("\n") if "reject_bystanders:" in l][0]
     assert "reject_bystanders: false" in line
 
 
