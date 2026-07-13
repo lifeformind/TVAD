@@ -247,3 +247,60 @@ def test_startup_assert_null_output_device_skips_pin_check(monkeypatch):
     monkeypatch.setattr("core.audio.respeaker.find", lambda: None)
     console = MagicMock()
     kiosk._assert_array_startup(_cfg_with_output(output_device=None), console)
+
+
+def test_sigterm_handler_raises_keyboard_interrupt():
+    # Restart from the tuning console TERMs the kiosk; without translating
+    # SIGTERM into the KeyboardInterrupt path the finally blocks
+    # (DoaTracker.stop) never run and the ReSpeaker USB endpoint is left
+    # stalled mid-control-transfer -> the NEXT launch's AGC/DOA control reads
+    # hit [Errno 32] Pipe error (live 2026-07-13, two launches in a row).
+    import pytest
+    import kiosk
+
+    with pytest.raises(KeyboardInterrupt):
+        kiosk._sigterm_to_interrupt(15, None)
+
+
+def test_usb_retry_gives_up_after_attempts(monkeypatch):
+    import pytest
+    import kiosk
+
+    monkeypatch.setattr("kiosk.time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def boom():
+        calls["n"] += 1
+        raise OSError(32, "Pipe error")
+
+    with pytest.raises(OSError):
+        kiosk._usb_retry(boom, attempts=3, delay_s=0)
+    assert calls["n"] == 3
+
+
+def test_transient_epipe_on_doa_probe_recovers_by_retry(monkeypatch):
+    # A stalled control endpoint clears within ~a second; the startup assert
+    # retries briefly instead of declaring DOA unavailable for the whole run.
+    import kiosk
+
+    cfg = _config()
+    cfg["kiosk"]["talkback"]["turn_gate"] = {"doa": {"enabled": True}}
+    fake_dev = object()
+    monkeypatch.setattr("core.audio.respeaker.find", lambda: fake_dev)
+    monkeypatch.setattr("core.audio.respeaker.write_param",
+                        lambda dev, name, value: None)
+    monkeypatch.setattr("kiosk.time.sleep", lambda s: None)
+    attempts = {"n": 0}
+
+    def _read_param(dev, name):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise OSError(32, "Pipe error")
+        return 180
+
+    monkeypatch.setattr("core.audio.respeaker.read_param", _read_param)
+    console = MagicMock()
+    kiosk._assert_array_startup(cfg, console)
+    printed = " ".join(str(c) for c in console.print.call_args_list)
+    assert "DOA control readable" in printed
+    assert attempts["n"] == 2

@@ -298,10 +298,15 @@ class WakeGate:
         # Same-utterance halves of one speaker are highly self-similar; a noise/
         # garbage first segment is not — so 0.80 is honest HERE, while cross-
         # utterance verification (too noisy on short audio) is window 1's job.
-        # Only for segments >= 1.0s: halves off the 300ms VAD floor are too
-        # short to compare honestly and would false-refuse real users.
+        # The floor is on the HALVES: each must be >= 1.0s to embed honestly,
+        # so only segments >= 2.0s are checked. Live 2026-07-13: with a 1.0s
+        # SEGMENT floor, 1.0-1.1s quiet-room seeds were refused three times in
+        # a row (own-voice halves of ~500ms scored 0.15-0.34) while a 488ms
+        # seed skipped the check entirely and enrolled fine. Short seeds are
+        # still guarded by the DOA direction filter (D11) and the safety net's
+        # window-1 enroll_verify_failed.
         sr = int(self.config["core"]["audio"]["sample_rate"])
-        if len(segment.audio) >= sr:
+        if len(segment.audio) >= 2 * sr:
             thr = self._talkback_config.get("verify_before_serve_threshold", 0.80)
             half = len(segment.audio) // 2
             try:

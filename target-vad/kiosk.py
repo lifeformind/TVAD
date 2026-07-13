@@ -3,7 +3,9 @@
 
 from core import compat  # noqa: F401 — torchaudio/speechbrain shim
 import argparse
+import signal
 import sys
+import time
 from typing import Any, Optional
 
 import yaml
@@ -12,6 +14,28 @@ from rich.console import Console
 from modes.director.wakegate import WakeGate
 
 console = Console()
+
+
+def _sigterm_to_interrupt(signum, frame):
+    """SIGTERM (tuning-console Restart, kiosk-stack stop) must take the same
+    clean path as Ctrl-C: without it the finally blocks never run, the
+    DoaTracker dies mid-USB-control-transfer, and the ReSpeaker's control
+    endpoint is left stalled — the NEXT launch's AGC/DOA reads then fail with
+    [Errno 32] Pipe error (live 2026-07-13, two launches in a row)."""
+    raise KeyboardInterrupt
+
+
+def _usb_retry(fn, attempts: int = 3, delay_s: float = 0.5):
+    """ReSpeaker control transfers can hit a transient EPIPE right after a
+    previous kiosk died mid-transfer (stalled endpoint); it clears within
+    about a second. Retry briefly before declaring the assert failed."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception:
+            if i == attempts - 1:
+                raise
+            time.sleep(delay_s)
 
 
 def load_config(path: str) -> dict:
@@ -108,10 +132,14 @@ def _assert_array_startup(config: dict, console: Console) -> None:
         console.print(f"[green]✓[/] TTS output pinned: {name}")
     try:
         from core.audio import respeaker
-        dev = respeaker.find()
-        if dev is None:
-            raise RuntimeError("ReSpeaker not found on USB (2886:0018)")
-        respeaker.write_param(dev, "AGCONOFF", 0)
+
+        def _agc_off():
+            dev = respeaker.find()
+            if dev is None:
+                raise RuntimeError("ReSpeaker not found on USB (2886:0018)")
+            respeaker.write_param(dev, "AGCONOFF", 0)
+
+        _usb_retry(_agc_off)
         console.print("[green]✓[/] ReSpeaker AGC off")
     except Exception as e:
         console.print(
@@ -123,10 +151,14 @@ def _assert_array_startup(config: dict, console: Console) -> None:
     if doa_cfg.get("enabled", False) is True:
         try:
             from core.audio import respeaker
-            dev = respeaker.find()
-            if dev is None:
-                raise RuntimeError("ReSpeaker not found on USB (2886:0018)")
-            angle = respeaker.read_param(dev, "DOAANGLE")
+
+            def _doa_probe():
+                dev = respeaker.find()
+                if dev is None:
+                    raise RuntimeError("ReSpeaker not found on USB (2886:0018)")
+                return respeaker.read_param(dev, "DOAANGLE")
+
+            angle = _usb_retry(_doa_probe)
             console.print(f"[green]✓[/] DOA control readable (bearing now {angle}°)")
         except Exception as e:
             console.print(f"[red]✗[/] DOA unavailable ({e}) — cone gate will abstain")
@@ -240,6 +272,11 @@ def main():
         help="Force talkback_enabled=true (full-duplex voice assistant mode).",
     )
     args = parser.parse_args()
+
+    # Clean shutdown on SIGTERM (tuning-console Restart / kiosk-stack stop):
+    # same path as Ctrl-C so the finally below always releases the DoaTracker's
+    # USB handle (see _sigterm_to_interrupt).
+    signal.signal(signal.SIGTERM, _sigterm_to_interrupt)
 
     config = load_config(args.config)
     if args.wake_phrase:

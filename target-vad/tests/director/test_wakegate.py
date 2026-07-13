@@ -195,7 +195,7 @@ class TestVerifyBeforeServe:
         events = []
         g = make_gate(base_config, fake_mic, fake_vad, emb, fake_wake, fake_runtime,
                       on_event=lambda et, pl: events.append((et, pl)))
-        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
+        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(2200.0))
         fake_runtime.run.assert_not_called()
         assert g._state == "AWAIT_FIRST_SEGMENT"   # retry, not reset (19:38 live)
         types = [et for et, _ in events]
@@ -209,7 +209,7 @@ class TestVerifyBeforeServe:
         events = []
         g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
                       fake_runtime, on_event=lambda et, pl: events.append((et, pl)))
-        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
+        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(2200.0))
         fake_runtime.run.assert_called_once()
         assert "session_started" in [et for et, _ in events]
 
@@ -220,6 +220,20 @@ class TestVerifyBeforeServe:
             make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
                       fake_runtime),
             fake_wake, fake_vad, seg=make_segment(500.0))
+        assert fake_embedder.extract.call_count == 1    # full segment only
+        fake_runtime.run.assert_called_once()
+
+    def test_one_second_segment_skips_split_half(
+            self, base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+            fake_runtime):
+        # Live 2026-07-13: 1.0-1.1s seeds in a QUIET room were refused three
+        # times in a row (scores 0.15-0.34) — their ~500ms halves are below
+        # what ECAPA can embed honestly. The verify floor is on the HALVES:
+        # only segments >= 2.0s (halves >= 1.0s) are split-half checked.
+        drive_one_cycle(
+            make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
+                      fake_runtime),
+            fake_wake, fake_vad, seg=make_segment(1128.0))
         assert fake_embedder.extract.call_count == 1    # full segment only
         fake_runtime.run.assert_called_once()
 
@@ -252,7 +266,7 @@ class TestVerifyBeforeServe:
         events = []
         g = make_gate(base_config, fake_mic, fake_vad, fake_embedder, fake_wake,
                       fake_runtime, on_event=lambda et, pl: events.append((et, pl)))
-        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(1000.0))
+        drive_one_cycle(g, fake_wake, fake_vad, seg=make_segment(2200.0))
         fake_runtime.run.assert_not_called()
         assert g._state == "AWAIT_FIRST_SEGMENT"   # retry, not reset (19:38 live)
         # infra failure, not a verdict: no verify_refused event
@@ -277,7 +291,7 @@ class TestSeedRetry:
         fake_wake.process.return_value = 0.87
         g._handle_chunk(np.zeros(480, dtype=np.float32))       # wake
         fake_wake.process.return_value = None
-        fake_vad.process_chunk.return_value = [make_segment(1000.0)]
+        fake_vad.process_chunk.return_value = [make_segment(2200.0)]
         g._handle_chunk(np.zeros(480, dtype=np.float32))       # seed 1: refused
         assert g._pending_handoff is None
         assert g._state == "AWAIT_FIRST_SEGMENT"
