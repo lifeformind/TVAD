@@ -84,6 +84,7 @@ class GenerationWorker:
         full = []
         spoken = []
         first_frame_sent = False
+        aborted = None
         try:
             async for token in self._llm.stream(messages):
                 full.append(token)
@@ -103,8 +104,19 @@ class GenerationWorker:
         except asyncio.CancelledError:
             self._llm.cancel()                           # controller.py:527
             raise
+        except Exception as e:
+            # Mid-stream abort (server killed the completion / connection
+            # reset). MUST still fall through to ReplyComplete: it is the only
+            # event that returns the Director to LISTENING, and this task is
+            # fire-and-forget (runtime.py) so a raise here dies unobserved and
+            # strands the session in SPEAKING (live 2026-07-13: llama's
+            # interrupt_requests aborted a story after one sentence).
+            aborted = e
+            print(f"[director] generation {gen_id} aborted mid-stream: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr, flush=True)
         _diag(f"gen {gen_id}: streamed {len(full)} tokens, "
-              f"first_frame_sent={first_frame_sent}")
+              f"first_frame_sent={first_frame_sent}"
+              + (f", ABORTED={type(aborted).__name__}" if aborted else ""))
         await self._bus.emit(E.ReplyComplete(gen_id=gen_id,
                                              assistant_text="".join(full)))
 

@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import tempfile
 import threading
 import time
-import urllib.request
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -63,6 +64,15 @@ class TuningServer:
         self.config_path = os.path.abspath(config_path)
         self.kproc = kproc
         self.llm_url = llm_url
+        # Probe target = (host, port) only. The reachability check must be a
+        # bare TCP connect, never an HTTP request: llama-cpp-python's
+        # interrupt_requests (default true) aborts any in-flight streaming
+        # completion the moment another request touches the llama lock — GET
+        # /v1/models included (live 2026-07-13: this console's 3s poll killed
+        # a story reply after one sentence).
+        u = urllib.parse.urlsplit(llm_url)
+        self._llm_addr = (u.hostname or "127.0.0.1",
+                          u.port or (443 if u.scheme == "https" else 80))
         self._llm_cache = (0.0, False)
         self._save_lock = threading.Lock()
         server_ref = self
@@ -217,13 +227,15 @@ class TuningServer:
             raise
 
     def _llm_reachable(self) -> bool:
+        """Bare TCP connect — see the __init__ comment on _llm_addr for why
+        this must never be an HTTP request against the llama server."""
         ts, val = self._llm_cache
         if time.monotonic() - ts < _LLM_CACHE_S:
             return val
         try:
-            with urllib.request.urlopen(self.llm_url, timeout=0.5):
+            with socket.create_connection(self._llm_addr, timeout=0.5):
                 val = True
-        except Exception:
+        except OSError:
             val = False
         self._llm_cache = (time.monotonic(), val)
         return val

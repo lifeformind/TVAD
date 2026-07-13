@@ -191,3 +191,39 @@ def test_sigterm_handler_raises_systemexit():
     from tune.__main__ import _sigterm
     with pytest.raises(SystemExit):
         _sigterm(15, None)
+
+
+def test_llm_reachable_is_a_tcp_probe_not_an_http_request(tmp_path):
+    # llama-cpp-python's interrupt_requests (default true) aborts any in-flight
+    # streaming completion the moment ANY new HTTP request touches the llama
+    # lock — GET /v1/models included (live 2026-07-13: the console's 3s
+    # reachability poll killed a story reply after one sentence). Reachability
+    # must therefore be a bare TCP connect that never dispatches a route: a
+    # listener that speaks no HTTP at all counts as reachable.
+    import socket
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    cfg = tmp_path / "config.yaml"
+    shutil.copy(REAL_CONFIG, cfg)
+
+    def make(url):
+        kproc = KioskProcess(cmd=["bash", "-c", "sleep 30"],
+                             foreign_pids=lambda: [])
+        return TuningServer(config_path=str(cfg), kproc=kproc, port=0,
+                            llm_url=url)
+
+    up = make(f"http://127.0.0.1:{port}/v1/models")
+    try:
+        assert up._llm_reachable() is True
+    finally:
+        up.httpd.server_close()
+        listener.close()
+
+    down = make(f"http://127.0.0.1:{port}/v1/models")
+    try:
+        assert down._llm_reachable() is False
+    finally:
+        down.httpd.server_close()

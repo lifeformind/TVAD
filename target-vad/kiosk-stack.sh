@@ -142,11 +142,17 @@ start_llm_bg() {
   log "Starting llama_cpp.server on $HOST:$PORT (n_gpu_layers=$N_GPU_LAYERS)..."
   local extra=()
   [[ -n "$CHAT_FORMAT" ]] && extra+=(--chat_format "$CHAT_FORMAT")
+  # --interrupt_requests False: the default (True) aborts an in-flight
+  # streaming completion whenever ANY new request touches the llama lock —
+  # even a GET /v1/models. Live 2026-07-13: the tuning console's reachability
+  # poll killed a story reply after one sentence. The kiosk is the only
+  # completion client; nothing may interrupt its replies.
   nohup python3 -m llama_cpp.server \
     --model "$MODEL" \
     --host "$HOST" --port "$PORT" \
     --n_ctx "$N_CTX" \
     --n_gpu_layers "$N_GPU_LAYERS" \
+    --interrupt_requests False \
     "${extra[@]}" \
     >"$LLM_LOG" 2>&1 &
   echo $! > "$PID_FILE"

@@ -129,3 +129,33 @@ async def test_no_first_frame_when_llm_yields_nothing():
     assert not [e for e in events if isinstance(e, E.FirstTtsFrame)]
     done = [e for e in events if isinstance(e, E.ReplyComplete)]
     assert len(done) == 1 and done[0].gen_id == 3 and done[0].assistant_text == ""
+
+
+class AbortingLlm(FakeLlm):
+    """Streams its tokens then dies mid-stream — what the kiosk sees when the
+    llama server aborts an in-flight completion (interrupt_requests, live
+    2026-07-13) or the connection resets."""
+
+    async def stream(self, messages):
+        for t in self._tokens:
+            await asyncio.sleep(0)
+            yield t
+        raise RuntimeError("Response payload is not completed")
+
+
+@pytest.mark.asyncio
+async def test_mid_stream_abort_still_emits_reply_complete():
+    # A dead gen task with no ReplyComplete strands the Director in SPEAKING
+    # forever (live 2026-07-13: story stopped after one sentence, session hung).
+    w, bus, tts, pw = make_worker(["Once upon a time. "])
+    w._llm = AbortingLlm(["Once upon a time. "])
+    await w.execute(C.StartGeneration(gen_id=2,
+                                      messages=[{"role": "user", "content": "story"}],
+                                      steer=None))          # must not raise
+    events = []
+    while bus.qsize():
+        events.append(await bus.get())
+    done = [e for e in events if isinstance(e, E.ReplyComplete)]
+    assert len(done) == 1 and done[0].gen_id == 2
+    assert done[0].assistant_text == "Once upon a time. "
+    assert [e for e in events if isinstance(e, E.FirstTtsFrame)]
