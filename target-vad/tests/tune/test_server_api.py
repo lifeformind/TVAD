@@ -161,3 +161,17 @@ def test_unexpected_error_returns_500_json(tmp_path):
         assert status == 500 and "boom" in out["error"]
     finally:
         server.shutdown()
+
+
+def test_index_served_with_expected_ui_hooks(srv):
+    server, cfg = srv
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
+    conn.request("GET", "/")
+    resp = conn.getresponse()
+    body = resp.read().decode()
+    conn.close()
+    assert resp.status == 200
+    for hook in ("id=\"tabs\"", "id=\"panes\"", "id=\"savebar\"",
+                 "id=\"logpane\"", "/api/state", "/api/save", "/api/logs",
+                 "/api/kiosk/"):
+        assert hook in body, hook

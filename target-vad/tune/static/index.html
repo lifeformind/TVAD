@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiosk Tuning Console</title>
+<style>
+  :root {
+    --bg:#101418; --panel:#171d24; --line:#2a333d; --fg:#d7dde3;
+    --dim:#8a95a1; --accent:#4fb6ff; --ok:#41c98d; --warn:#e0a93e;
+    --bad:#e05c5c; --mono:ui-monospace,'Cascadia Code',Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.45 system-ui,sans-serif; display:flex;
+         flex-direction:column; height:100vh; }
+  header { padding:10px 16px; border-bottom:1px solid var(--line);
+           display:flex; align-items:baseline; gap:12px; }
+  header h1 { font-size:15px; margin:0; }
+  header .path { color:var(--dim); font-family:var(--mono); font-size:12px; }
+  #tabs { display:flex; gap:2px; padding:0 12px; border-bottom:1px solid var(--line); }
+  #tabs button { background:none; border:none; border-bottom:2px solid transparent;
+    color:var(--dim); padding:8px 12px; cursor:pointer; font:inherit; }
+  #tabs button.active { color:var(--fg); border-bottom-color:var(--accent); }
+  #panes { flex:1 1 45%; overflow-y:auto; padding:12px 16px; }
+  .knob { display:grid; grid-template-columns:230px 1fr 14px; gap:4px 14px;
+          padding:9px 8px; border-bottom:1px solid var(--line); align-items:center; }
+  .knob.danger { border-left:3px solid var(--warn); padding-left:10px; }
+  .knob label.name { font-weight:600; }
+  .knob .doc { grid-column:1 / -1; color:var(--dim); font-size:12.5px; }
+  .knob .why { grid-column:1 / -1; color:var(--warn); font-size:12.5px;
+               display:none; white-space:pre-wrap; }
+  .knob.openwhy .why { display:block; }
+  .ctrl { display:flex; gap:10px; align-items:center; }
+  .ctrl input[type=range] { flex:1; accent-color:var(--accent); }
+  .ctrl input[type=number] { width:90px; }
+  input, select, textarea { background:var(--panel); color:var(--fg);
+    border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
+  textarea { width:100%; min-height:70px; font-family:var(--mono); font-size:12.5px; }
+  .dirty { width:8px; height:8px; border-radius:50%; background:transparent; }
+  .knob.isdirty .dirty { background:var(--accent); }
+  .whybtn { background:none; border:none; color:var(--dim); cursor:pointer; }
+  #savebar { display:none; border-top:1px solid var(--line);
+    background:var(--panel); padding:8px 16px; }
+  #savebar.show { display:block; }
+  #savebar .changes { font-family:var(--mono); font-size:12px; color:var(--dim);
+    max-height:70px; overflow-y:auto; margin-bottom:6px; }
+  #savebar .err { color:var(--bad); font-size:12.5px; margin-left:10px; }
+  button.primary { background:var(--accent); color:#04212f; border:none;
+    border-radius:4px; padding:5px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  button.ghost { background:none; border:1px solid var(--line); color:var(--fg);
+    border-radius:4px; padding:5px 12px; font:inherit; cursor:pointer; }
+  #kioskstrip { display:flex; align-items:center; gap:12px; padding:8px 16px;
+    border-top:1px solid var(--line); background:var(--panel); }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .dot.on { background:var(--ok); } .dot.off { background:var(--dim); }
+  .dot.bad { background:var(--bad); }
+  #restarthint { color:var(--warn); display:none; }
+  #logpane { flex:1 1 35%; overflow-y:auto; background:#0b0e12;
+    font-family:var(--mono); font-size:12px; padding:8px 12px;
+    border-top:1px solid var(--line); white-space:pre-wrap; }
+  .l-diag { color:#7fb3d5; } .l-reject { color:var(--bad); }
+  .l-wake { color:#c39be0; } .l-session { color:var(--ok); }
+  .l-trace { color:var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kiosk Tuning Console</h1>
+  <span class="path" id="cfgpath"></span>
+</header>
+<nav id="tabs"></nav>
+<main id="panes"></main>
+<div id="savebar">
+  <div class="changes" id="changelist"></div>
+  <button class="primary" id="savebtn">Save</button>
+  <button class="ghost" id="revertbtn">Revert edits</button>
+  <span class="err" id="saveerr"></span>
+</div>
+<div id="kioskstrip">
+  <span><span class="dot off" id="kioskdot"></span> <span id="kiosklabel">kiosk stopped</span></span>
+  <span><span class="dot off" id="llmdot"></span> LLM</span>
+  <label><input type="checkbox" id="diagbox" checked> DIAG</label>
+  <button class="ghost" id="startbtn">Start</button>
+  <button class="ghost" id="stopbtn">Stop</button>
+  <button class="primary" id="restartbtn">Restart</button>
+  <span id="restarthint">config changed — restart to apply</span>
+  <span style="flex:1"></span>
+  <button class="ghost" id="clearlog">Clear log</button>
+</div>
+<pre id="logpane"></pre>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let KNOBS = [], SAVED = {}, EDITS = {}, activeTab = null, autoscroll = true;
+
+const norm = v => (typeof v === "number" ? Math.round(v * 1e9) / 1e9 : v);
+const isDirty = p => p in EDITS && norm(EDITS[p]) !== norm(SAVED[p]);
+const dirtyPaths = () => Object.keys(EDITS).filter(isDirty);
+
+async function api(method, path, body) {
+  const r = await fetch(path, {method, headers: {"Content-Type": "application/json"},
+    body: body === undefined ? undefined : JSON.stringify(body)});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.status);
+  return data;
+}
+
+function buildTabs() {
+  const tabs = [...new Set(KNOBS.map(k => k.tab))];
+  $("tabs").innerHTML = "";
+  tabs.forEach(t => {
+    const b = document.createElement("button");
+    b.textContent = t;
+    b.onclick = () => { activeTab = t; render(); };
+    b.className = t === activeTab ? "active" : "";
+    $("tabs").appendChild(b);
+  });
+  if (!activeTab) activeTab = tabs[0];
+}
+
+function control(k, cur) {
+  const wrap = document.createElement("div");
+  wrap.className = "ctrl";
+  const set = v => { EDITS[k.path] = v; refreshDirty(k.path); };
+  if (k.kind === "float" || k.kind === "int") {
+    const slider = document.createElement("input");
+    slider.type = "range"; slider.min = k.min; slider.max = k.max; slider.step = k.step;
+    const num = document.createElement("input");
+    num.type = "number"; num.min = k.min; num.max = k.max; num.step = k.step;
+    const sync = v => { slider.value = v; num.value = v; };
+    slider.oninput = () => { sync(slider.value); set(Number(slider.value)); };
+    num.oninput = () => { sync(num.value); set(Number(num.value)); };
+    let auto = null;
+    if (k.nullable) {
+      auto = document.createElement("label");
+      const cb = document.createElement("input"); cb.type = "checkbox";
+      cb.checked = cur === null;
+      cb.onchange = () => {
+        slider.disabled = num.disabled = cb.checked;
+        set(cb.checked ? null : Number(num.value || k.min));
+      };
+      auto.append(cb, " auto (null)");
+      slider.disabled = num.disabled = cur === null;
+    }
+    sync(cur === null ? k.min : cur);
+    wrap.append(slider, num); if (auto) wrap.append(auto);
+  } else if (k.kind === "bool") {
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = cur === true;
+    cb.onchange = () => set(cb.checked);
+    wrap.append(cb);
+  } else if (k.kind === "select") {
+    const sel = document.createElement("select");
+    k.choices.forEach(c => {
+      const o = document.createElement("option");
+      o.value = c; o.textContent = c; o.selected = c === cur;
+      sel.appendChild(o);
+    });
+    sel.onchange = () => set(sel.value);
+    wrap.append(sel);
+  } else if (k.kind === "textarea") {
+    const ta = document.createElement("textarea");
+    ta.value = cur ?? ""; ta.oninput = () => set(ta.value);
+    wrap.append(ta);
+  } else {
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.value = cur ?? ""; inp.oninput = () => set(inp.value);
+    wrap.append(inp);
+  }
+  return wrap;
+}
+
+function render() {
+  buildTabs();
+  const pane = $("panes"); pane.innerHTML = "";
+  KNOBS.filter(k => k.tab === activeTab).forEach(k => {
+    const row = document.createElement("div");
+    row.className = "knob" + (k.danger ? " danger" : "");
+    row.dataset.path = k.path;
+    const name = document.createElement("label");
+    name.className = "name"; name.textContent = k.label;
+    if (k.why) {
+      const b = document.createElement("button");
+      b.className = "whybtn"; b.textContent = " ⓘ";
+      b.onclick = () => row.classList.toggle("openwhy");
+      name.appendChild(b);
+    }
+    const cur = k.path in EDITS ? EDITS[k.path] : SAVED[k.path];
+    const dot = document.createElement("span"); dot.className = "dirty";
+    row.append(name, control(k, cur), dot);
+    const doc = document.createElement("div");
+    doc.className = "doc"; doc.textContent = k.doc; row.append(doc);
+    if (k.why) {
+      const why = document.createElement("div");
+      why.className = "why"; why.textContent = k.why; row.append(why);
+    }
+    pane.append(row);
+    refreshDirty(k.path);
+  });
+}
+
+function refreshDirty(path) {
+  const row = document.querySelector(`.knob[data-path="${path}"]`);
+  if (row) row.classList.toggle("isdirty", isDirty(path));
+  const dirty = dirtyPaths();
+  $("savebar").classList.toggle("show", dirty.length > 0);
+  $("changelist").textContent = dirty.map(p =>
+    `${p}: ${JSON.stringify(SAVED[p])} → ${JSON.stringify(EDITS[p])}`).join("\n");
+}
+
+$("savebtn").onclick = async () => {
+  const changes = {};
+  dirtyPaths().forEach(p => changes[p] = EDITS[p]);
+  $("saveerr").textContent = "";
+  try {
+    await api("POST", "/api/save", {changes});
+    Object.assign(SAVED, changes);
+    EDITS = {};
+    render();
+    if (lastKiosk.running) $("restarthint").style.display = "inline";
+  } catch (e) { $("saveerr").textContent = e.message; }
+};
+$("revertbtn").onclick = () => { EDITS = {}; $("saveerr").textContent = ""; render(); };
+
+let lastKiosk = {running: false};
+function applyState(st) {
+  $("cfgpath").textContent = st.config_path;
+  st.knobs.forEach(k => { SAVED[k.path] = k.value; });
+  KNOBS = st.knobs;
+  lastKiosk = st.kiosk;
+  $("kioskdot").className = "dot " + (st.kiosk.running ? "on" : "off");
+  $("kiosklabel").textContent = st.kiosk.running
+    ? `kiosk running (pid ${st.kiosk.pid}${st.kiosk.diag ? ", DIAG" : ""})`
+    : "kiosk stopped";
+  $("llmdot").className = "dot " + (st.llm.reachable ? "on" : "bad");
+  if (!st.kiosk.running) $("restarthint").style.display = "none";
+}
+
+async function poll(rerender) {
+  try {
+    const st = await api("GET", "/api/state");
+    applyState(st);
+    if (rerender) render();
+  } catch (e) { /* server briefly away; next poll retries */ }
+}
+
+async function kiosk(action) {
+  try {
+    await api("POST", `/api/kiosk/${action}`,
+      action === "start" ? {diag: $("diagbox").checked} : {});
+    $("restarthint").style.display = "none";
+    await poll(false);
+  } catch (e) { logLine(`[tune] ${e.message}`); }
+}
+$("startbtn").onclick = () => kiosk("start");
+$("stopbtn").onclick = () => kiosk("stop");
+$("restartbtn").onclick = () => kiosk("restart");
+$("clearlog").onclick = () => { $("logpane").innerHTML = ""; };
+
+const HILITE = [
+  [/REJECT=|\[EJECT/, "l-reject"], [/\[DIAG/, "l-diag"], [/\[WAKE\]/, "l-wake"],
+  [/\[SESSION (STARTED|ENDED)\]/, "l-session"], [/Traceback/, "l-trace"],
+];
+function logLine(text) {
+  const div = document.createElement("div");
+  for (const [re, cls] of HILITE) if (re.test(text)) { div.className = cls; break; }
+  div.textContent = text;
+  const pane = $("logpane");
+  pane.appendChild(div);
+  while (pane.childNodes.length > 3000) pane.removeChild(pane.firstChild);
+  if (autoscroll) pane.scrollTop = pane.scrollHeight;
+}
+$("logpane").onscroll = () => {
+  const p = $("logpane");
+  autoscroll = p.scrollTop + p.clientHeight >= p.scrollHeight - 8;
+};
+new EventSource("/api/logs").onmessage = ev => logLine(ev.data);
+
+poll(true).then(() => setInterval(() => poll(false), 3000));
+</script>
+</body>
+</html>
