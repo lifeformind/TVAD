@@ -168,7 +168,10 @@ wait_for_llm() {
   cmd_stop; exit 1
 }
 
-cmd_start() {
+# Bring the LLM up (or adopt one we already started) and arm the EXIT trap.
+# Shared by cmd_start (kiosk in the terminal) and cmd_tune (kiosk under the
+# tuning console).
+ensure_llm() {
   MODEL="$(resolve_model)"
   if [[ -z "$MODEL" || ! -f "$MODEL" ]]; then
     err "No q5 model found under $HF_CACHE. Run: $0 download-model"
@@ -195,6 +198,10 @@ cmd_start() {
   if [[ "${WE_STARTED_LLM:-0}" == "1" ]]; then
     trap 'cmd_stop' EXIT
   fi
+}
+
+cmd_start() {
+  ensure_llm
 
   log "Launching kiosk (foreground). Ctrl-C to end the session and stop the LLM."
   # Tee stdout+stderr to a log so a crash/segfault is captured (the kiosk runs
@@ -205,10 +212,23 @@ cmd_start() {
   PYTHONFAULTHANDLER=1 stdbuf -oL -eL python3 kiosk.py --talkback 2>&1 | tee "$kiosk_log"
 }
 
+# One command for a tuning evening: LLM up, then the tuning console in the
+# foreground with the kiosk auto-started under it (DIAG on). The kiosk's
+# stdout goes to the console's browser log pane, not this terminal; Ctrl-C
+# stops console -> kiosk -> (via the EXIT trap) the LLM.
+cmd_tune() {
+  ensure_llm
+  log "Launching tuning console (foreground). Ctrl-C stops the kiosk and the LLM."
+  PYTHONFAULTHANDLER=1 python3 -m tune --start-kiosk "$@"
+}
+
 usage() {
   cat <<EOF
-Usage: $0 {start|stop|status|build-llm|download-model}
+Usage: $0 {start|tune|stop|status|build-llm|download-model}
   start          bring up the LLM (GPU) then run the kiosk in the foreground
+  tune           bring up the LLM, then the tuning console with the kiosk
+                 auto-started under it (extra args pass through, e.g.
+                 $0 tune --host 0.0.0.0)
   stop           full shutdown: stop the kiosk (any launch mode) and the LLM server
   status         show LLM / model / GPU status
   build-llm      one-time: rebuild llama-cpp-python with CUDA (sm_121)
@@ -220,6 +240,7 @@ main() {
   local cmd="${1:-}"
   case "$cmd" in
     start)          cmd_start ;;
+    tune)           shift; cmd_tune "$@" ;;
     stop)           cmd_stop ;;
     status)         cmd_status ;;
     build-llm)      cmd_build ;;
