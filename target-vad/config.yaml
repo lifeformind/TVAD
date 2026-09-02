@@ -108,8 +108,11 @@ kiosk:
       temperature: 0.6
       max_tokens: 512
       system_prompt: |
-        You are a concise voice assistant. Replies should be 1-3 sentences,
-        natural-sounding, and avoid lists, code blocks, or markdown.
+        You are a natural-sounding voice assistant. Keep ordinary replies to
+        1-3 sentences. When the user asks for a story, explanation, or
+        anything that needs it, you may speak at length — but never use
+        lists, code blocks, or markdown, since everything you say is read
+        aloud. 
 
     tts:
       backend: "kokoro"
