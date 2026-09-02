@@ -104,7 +104,7 @@ kiosk:
 
     llm:
       base_url: "http://127.0.0.1:8080/v1"
-      model: "gemma-3-4b-it"
+      model: "gemma-4-26b-a4b-it"
       temperature: 0.6
       max_tokens: 512
       # GBNF grammar bans *, #, backtick, _, ~ at the DECODER, so markdown
@@ -121,7 +121,12 @@ kiosk:
         1-3 sentences. When the user asks for a story, explanation, or
         anything that needs it, you may speak at length — but never use
         lists, code blocks, or markdown, since everything you say is read
-        aloud. 
+        aloud.
+
+        Your input comes from speech recognition and may occasionally
+        contain misheard words. If a request seems nonsensical or contains
+        an improbable phrase, don't guess: briefly say what you heard and
+        ask one short clarifying question instead of answering.
 
     tts:
       backend: "kokoro"

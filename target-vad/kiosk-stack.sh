@@ -6,13 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ---- config (edit here) ----
-MODEL_REPO="unsloth/gemma-3-4b-it-GGUF"
-MODEL_GLOB="gemma-3-4b-it-Q5_K_M.gguf"
+MODEL_REPO="unsloth/gemma-4-26B-A4B-it-GGUF"   # verified via list_models(search='gemma-4-26b')
+MODEL_GLOB="*Q4_K_M*.gguf"
 HF_CACHE="$HOME/.cache/models"
-N_CTX=4096
+N_CTX=8192
 HOST=127.0.0.1
 PORT=8080
-READY_TIMEOUT_S=120
+READY_TIMEOUT_S=300  # Gemma 4 26B-A4B (Q4_K_M, ~16.9GB) first load is slow; was 120s for gemma-3-4b
 
 # Native llama.cpp server (replaces python -m llama_cpp.server; needed for
 # Gemma 4 MoE day-one support, per-request GBNF grammar, and slot prompt
@@ -160,6 +160,13 @@ start_llm_bg() {
   # abort in-flight streams when /v1/models is probed (that was the
   # llama-cpp-python bug fixed in 4741b27).
   # --cache-reuse 256: enables KV prefix reuse within the single slot.
+  # --reasoning off: Gemma 4's chat template auto-enables a "thinking" turn
+  # (llama-server's --reasoning default is 'auto', which detects and turns
+  # it on for this template). Left on, a short voice reply's whole
+  # max_tokens budget gets consumed by reasoning_content and "content"
+  # comes back empty (finish_reason "length") — the kiosk only reads
+  # delta.content, so the assistant would go silent. Off at the server
+  # level so no client-side payload change is needed.
   nohup "$LLAMA_SERVER_BIN" \
     --model "$MODEL" \
     --host "$HOST" --port "$PORT" \
@@ -168,6 +175,7 @@ start_llm_bg() {
     --parallel 1 \
     --cache-reuse 256 \
     --jinja \
+    --reasoning off \
     >"$LLM_LOG" 2>&1 &
   echo $! > "$PID_FILE"; WE_STARTED_LLM=1
 }
