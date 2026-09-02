@@ -107,6 +107,15 @@ kiosk:
       model: "gemma-3-4b-it"
       temperature: 0.6
       max_tokens: 512
+      # GBNF grammar bans *, #, backtick, _, ~ at the DECODER, so markdown
+      # can't be emitted at all; strip_markdown_for_speech stays as the net
+      # for bullets/links. Only a real boolean true enables.
+      no_markdown_grammar: true
+      # llama-server slot prompt caching: keeps the conversation's KV prefix
+      # warm across turns (id_slot 0 + cache_prompt). Reported TTFT
+      # 400ms -> <50ms on cached prefixes. Requires the native llama-server
+      # launched by kiosk-stack.sh (Task 2).
+      cache_prompt: true
       system_prompt: |
         You are a natural-sounding voice assistant. Keep ordinary replies to
         1-3 sentences. When the user asks for a story, explanation, or

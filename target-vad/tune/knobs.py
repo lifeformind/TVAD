@@ -219,6 +219,10 @@ KNOBS: tuple[Knob, ...] = (
          "Sampling temperature.", min=0.0, max=2.0, step=0.05),
     Knob(TB + "llm.max_tokens", VOICE, "LLM max tokens", "int",
          "Reply cap.", min=32, max=2048, step=32),
+    Knob(TB + "llm.no_markdown_grammar", VOICE, "No-markdown grammar", "bool",
+         "Ban markdown characters at the decoder (GBNF).",
+         "Replaces regex stripping as the primary defense.",
+         strict_bool=True),
     Knob(TB + "llm.system_prompt", VOICE, "System prompt", "textarea",
          "Voice-assistant persona; keep replies short and markdown-free "
          "(markdown leaks into TTS)."),

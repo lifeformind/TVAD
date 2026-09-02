@@ -19,11 +19,15 @@ class LlmClient:
         model: str,
         temperature: float = 0.6,
         max_tokens: int = 512,
+        grammar: str | None = None,
+        cache_prompt: bool = False,
     ):
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._grammar = grammar
+        self._cache_prompt = cache_prompt
         self._session: aiohttp.ClientSession | None = None
         self._cancelled = False
 
@@ -43,6 +47,11 @@ class LlmClient:
             "temperature": self._temperature,
             "max_tokens": self._max_tokens,
         }
+        if self._grammar:
+            payload["grammar"] = self._grammar
+        if self._cache_prompt:
+            payload["cache_prompt"] = True
+            payload["id_slot"] = 0  # single conversation = single slot; keeps the KV prefix warm across turns
 
         async with session.post(
             f"{self._base_url}/chat/completions",

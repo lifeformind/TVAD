@@ -60,6 +60,7 @@ def test_strict_bools_are_exactly_the_documented_keys():
         "kiosk.talkback.turn_gate.require_speaker_match",
         "kiosk.talkback.turn_gate.reject_bystanders",
         "kiosk.talkback.turn_gate.doa.enabled",
+        "kiosk.talkback.llm.no_markdown_grammar",
     }
 
 
