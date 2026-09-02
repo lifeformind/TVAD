@@ -9,14 +9,9 @@ cd "$SCRIPT_DIR"
 MODEL_REPO="unsloth/gemma-3-4b-it-GGUF"
 MODEL_GLOB="gemma-3-4b-it-Q5_K_M.gguf"
 HF_CACHE="$HOME/.cache/models"
-N_GPU_LAYERS=-1          # full GPU offload; needs the CUDA build (build-llm)
 N_CTX=4096
 HOST=127.0.0.1
 PORT=8080
-# Empty -> use the GGUF's embedded chat template. Required for Gemma 3: the
-# built-in 'gemma'/'chatml' handlers drop the system prompt, so replies ignore
-# the "1-3 sentences, no markdown" instruction and run to the token cap.
-CHAT_FORMAT=""
 READY_TIMEOUT_S=120
 
 # Native llama.cpp server (replaces python -m llama_cpp.server; needed for
@@ -156,24 +151,25 @@ cmd_stop() {
 }
 start_llm_bg() {
   mkdir -p "$LOG_DIR"
-  log "Starting llama_cpp.server on $HOST:$PORT (n_gpu_layers=$N_GPU_LAYERS)..."
-  local extra=()
-  [[ -n "$CHAT_FORMAT" ]] && extra+=(--chat_format "$CHAT_FORMAT")
-  # --interrupt_requests False: the default (True) aborts an in-flight
-  # streaming completion whenever ANY new request touches the llama lock —
-  # even a GET /v1/models. Live 2026-07-13: the tuning console's reachability
-  # poll killed a story reply after one sentence. The kiosk is the only
-  # completion client; nothing may interrupt its replies.
-  nohup python3 -m llama_cpp.server \
+  log "Starting llama-server on $HOST:$PORT..."
+  if [[ ! -x "$LLAMA_SERVER_BIN" ]]; then
+    echo "llama-server not built — run: $0 build-server" >&2; exit 5
+  fi
+  # No --interrupt_requests here: that llama-cpp-python flag doesn't exist on
+  # native llama-server, and it's not needed — native llama-server does not
+  # abort in-flight streams when /v1/models is probed (that was the
+  # llama-cpp-python bug fixed in 4741b27).
+  # --cache-reuse 256: enables KV prefix reuse within the single slot.
+  nohup "$LLAMA_SERVER_BIN" \
     --model "$MODEL" \
     --host "$HOST" --port "$PORT" \
-    --n_ctx "$N_CTX" \
-    --n_gpu_layers "$N_GPU_LAYERS" \
-    --interrupt_requests False \
-    "${extra[@]}" \
+    --ctx-size "$N_CTX" \
+    -ngl 999 \
+    --parallel 1 \
+    --cache-reuse 256 \
+    --jinja \
     >"$LLM_LOG" 2>&1 &
-  echo $! > "$PID_FILE"
-  WE_STARTED_LLM=1
+  echo $! > "$PID_FILE"; WE_STARTED_LLM=1
 }
 
 wait_for_llm() {
