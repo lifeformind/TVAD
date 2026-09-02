@@ -239,16 +239,27 @@ def _build_runtime(config: dict) -> _LazyDirectorRuntime:
         sys.exit(3)
     llm_cfg = tb_cfg.get("llm", {})
     grammar = None
-    if llm_cfg.get("no_markdown_grammar", False) is True:
+    no_markdown_grammar = llm_cfg.get("no_markdown_grammar", False)
+    if no_markdown_grammar is not True:
+        if "no_markdown_grammar" in llm_cfg and not isinstance(no_markdown_grammar, bool):
+            print(f"[kiosk] llm.no_markdown_grammar is not a boolean "
+                  f"(got {no_markdown_grammar!r}) -> treating as disabled",
+                  file=sys.stderr, flush=True)
+    else:
         from modes.talkback.gbnf import SPEECH_GRAMMAR
         grammar = SPEECH_GRAMMAR
+    cache_prompt = llm_cfg.get("cache_prompt", False)
+    if cache_prompt is not True and "cache_prompt" in llm_cfg and not isinstance(cache_prompt, bool):
+        print(f"[kiosk] llm.cache_prompt is not a boolean "
+              f"(got {cache_prompt!r}) -> treating as disabled",
+              file=sys.stderr, flush=True)
     llm = LlmClient(
         base_url=llm_cfg.get("base_url", "http://127.0.0.1:8080/v1"),
         model=llm_cfg.get("model", "gemma-3-4b-it"),
         temperature=llm_cfg.get("temperature", 0.6),
         max_tokens=llm_cfg.get("max_tokens", 512),
         grammar=grammar,
-        cache_prompt=llm_cfg.get("cache_prompt", False) is True,
+        cache_prompt=cache_prompt is True,
     )
     tts_cfg = tb_cfg.get("tts", {})
     tts = TtsEngine(

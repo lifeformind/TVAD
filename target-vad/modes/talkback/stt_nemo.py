@@ -77,7 +77,13 @@ class NemoStt:
     def _transcribe_sync(self, audio: np.ndarray) -> TranscriptResult:
         hyps = self._model.transcribe(
             audio=[audio], return_hypotheses=True, verbose=False)
+        if not hyps:
+            return TranscriptResult(text="", mean_word_prob=0.0)
         hyp = hyps[0]
+        # Some NeMo versions nest single-output batches in a list-of-lists
+        # (bench/stt_backend_probe.py._run_transcribe carries the same defense).
+        if isinstance(hyp, list) and hyp:
+            hyp = hyp[0]
         text = (hyp.text or "").strip()
         conf = getattr(hyp, "word_confidence", None)
         if not text:

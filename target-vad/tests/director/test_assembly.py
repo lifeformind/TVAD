@@ -289,6 +289,23 @@ def test_score_norm_empty_cohort_fails_open_and_warns(tmp_path, capsys):
     assert "score_norm" in err and "falling back to raw scores" in err
 
 
+def test_score_norm_non_2d_cohort_fails_open_and_warns(tmp_path, capsys):
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    flat_path = tmp_path / "flat.npy"
+    np.save(flat_path, np.zeros(192, dtype=np.float32))  # 1-D, not (n, d)
+    emb = object()
+    prim = np.ones(192, dtype=np.float32)
+    bus = EventBus()
+    cfg = {"turn_gate": {"require_speaker_match": True,
+                         "score_norm": {"mode": "on", "cohort_path": str(flat_path)}}}
+    worker = _build_safety_net(cfg, prim, emb, bus)
+    assert worker._net._normalizer is None
+    assert worker._net._norm_decides is False
+    err = capsys.readouterr().err
+    assert "score_norm" in err and "falling back to raw scores" in err
+
+
 def test_lockout_enabled_strict_bool_mapping():
     from modes.director.assembly import _director_config_from
     assert _director_config_from(

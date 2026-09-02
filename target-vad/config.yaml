@@ -164,8 +164,14 @@ kiosk:
       # (bench/build_cohort.py). mode: off = raw scores (today) | shadow =
       # normalized score computed + logged, raw still decides | on =
       # normalized score decides, using the *_norm thresholds. Ship shadow
-      # first; flip to on only after a bench/speaker_scores.py sweep of
-      # live shadow logs picks the norm thresholds.
+      # first; flip to on only after picking norm thresholds from real data.
+      # bench/speaker_scores.py does NOT see norm scores — it parses jsonl
+      # events, which never carry a norm_score field. The real collection
+      # path: run with TVAD_DIAG=1 and harvest the `norm=` field off the
+      # safety-net DIAG console lines (modes/director/reducer.py
+      # safety_diag_line), which is turn_gate-only. barge_in.speaker_threshold_norm
+      # below has NO shadow data source yet — barge-in computes no norm
+      # score in shadow — and needs its own measurement before "on".
       score_norm:
         mode: "shadow"
         cohort_path: "./voiceprints/cohort.npy"
@@ -188,6 +194,11 @@ kiosk:
       # Running enrollment centroid: windows scoring >= threshold+margin
       # fold into the primary voiceprint (EMA), absorbing far-field drift.
       # 0.0 disables. Margin is the poison guard.
+      # margin is applied to the DECIDING score, so it shares that score's
+      # scale: raw cosine when score_norm.mode is off/shadow (0.10 is sane
+      # there), but AS-Norm z-like scale if score_norm.mode is ever flipped
+      # to "on" — 0.10 sigma is then ~no poison guard at all; retune to
+      # ~1.0+ before flipping to "on".
       enrollment_update_alpha: 0.10
       enrollment_update_margin: 0.10
       # Director-11: DOA cone vote — direction as a fourth gate. The tracker

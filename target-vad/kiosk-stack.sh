@@ -102,7 +102,14 @@ cmd_status() {
   else
     log "LLM endpoint: unreachable"
   fi
-  if gpu_offload; then log "llama_cpp GPU offload: available"; else log "llama_cpp GPU offload: NOT available (CPU build)"; fi
+  # Native llama-server is the serving path (see LLAMA_SERVER_BIN above);
+  # llama_cpp GPU offload only matters for the rollback path (build-llm ->
+  # python -m llama_cpp.server), so report the binary that actually serves.
+  if [[ -x "$LLAMA_SERVER_BIN" ]]; then
+    log "Native llama-server: built ($("$LLAMA_SERVER_BIN" --version 2>&1 | head -n1))"
+  else
+    log "Native llama-server: NOT built (run: $0 build-server)"
+  fi
   local model; model="$(resolve_model)"
   if [[ -n "$model" ]]; then log "Model: $model"; else log "Model: not downloaded (run: $0 download-model)"; fi
 }
@@ -201,7 +208,7 @@ wait_for_llm() {
 ensure_llm() {
   MODEL="$(resolve_model)"
   if [[ -z "$MODEL" || ! -f "$MODEL" ]]; then
-    err "No q5 model found under $HF_CACHE. Run: $0 download-model"
+    err "No $MODEL_GLOB model found under $HF_CACHE. Run: $0 download-model"
     exit 1
   fi
 
@@ -260,7 +267,7 @@ Usage: $0 {start|tune|stop|status|build-llm|build-server|download-model}
   status         show LLM / model / GPU status
   build-llm      one-time: rebuild llama-cpp-python with CUDA (sm_121)
   build-server   one-time: build native llama-server with CUDA (sm_121)
-  download-model one-time: download the q5 GGUF into the HF cache
+  download-model one-time: download the Q4_K_M GGUF into the HF cache
 EOF
 }
 

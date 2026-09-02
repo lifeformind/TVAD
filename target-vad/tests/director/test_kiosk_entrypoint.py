@@ -398,3 +398,64 @@ def test_build_runtime_unknown_backend_exits(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         kiosk._build_runtime(cfg)
     assert exc.value.code == 3
+
+
+# ---- _build_runtime: llm.no_markdown_grammar / llm.cache_prompt strict-bool ----
+
+def _config_with_llm(llm_cfg):
+    cfg = _config()
+    cfg["kiosk"]["talkback"]["llm"] = llm_cfg
+    return cfg
+
+
+def test_no_markdown_grammar_non_bool_warns_and_disables(monkeypatch, capsys):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _config_with_llm({"no_markdown_grammar": "flase"})
+    kiosk._build_runtime(cfg)
+    err = capsys.readouterr().err
+    assert "llm.no_markdown_grammar is not a boolean" in err
+    assert "'flase'" in err
+
+
+def test_no_markdown_grammar_true_enables_grammar_silently(monkeypatch, capsys):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _config_with_llm({"no_markdown_grammar": True})
+    kiosk._build_runtime(cfg)
+    err = capsys.readouterr().err
+    assert "no_markdown_grammar" not in err
+
+
+def test_cache_prompt_non_bool_warns_and_disables(monkeypatch, capsys):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _config_with_llm({"cache_prompt": "flase"})
+    kiosk._build_runtime(cfg)
+    err = capsys.readouterr().err
+    assert "llm.cache_prompt is not a boolean" in err
+    assert "'flase'" in err
+
+
+def test_cache_prompt_true_is_silent(monkeypatch, capsys):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _config_with_llm({"cache_prompt": True})
+    kiosk._build_runtime(cfg)
+    err = capsys.readouterr().err
+    assert "cache_prompt" not in err
+
+
+def test_llm_flags_absent_is_silent(monkeypatch, capsys):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _talkback_config()
+    kiosk._build_runtime(cfg)
+    err = capsys.readouterr().err
+    assert "no_markdown_grammar" not in err
+    assert "cache_prompt" not in err

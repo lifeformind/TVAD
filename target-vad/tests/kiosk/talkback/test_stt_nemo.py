@@ -31,6 +31,23 @@ def _make(hyp):
     return stt
 
 
+class _FakeNemoModelRaw:
+    """Returns whatever `hyps` shape the caller supplies, unwrapped by
+    _FakeNemoModel's [self._hyp] wrapping — for exercising the empty-list
+    and nested-list-of-lists defenses directly."""
+    def __init__(self, hyps):
+        self._hyps = hyps
+    def transcribe(self, audio, return_hypotheses=True, verbose=False):
+        return self._hyps
+
+
+def _make_raw(hyps):
+    stt = NemoStt.__new__(NemoStt)
+    stt._model = _FakeNemoModelRaw(hyps)
+    stt._device = "cpu"
+    return stt
+
+
 @pytest.mark.asyncio
 async def test_transcribe_returns_text_and_mean_confidence():
     stt = _make(_Hyp(" hello there ", [0.9, 0.7]))
@@ -50,3 +67,24 @@ async def test_empty_text_scores_zero():
     stt = _make(_Hyp("", None))
     result = await stt.transcribe_segment(np.zeros(16000, dtype=np.float32))
     assert result.text == "" and result.mean_word_prob == 0.0
+
+
+@pytest.mark.asyncio
+async def test_empty_hyps_list_returns_empty_result():
+    # transcribe() returning [] (no hypothesis at all) must not IndexError
+    # on hyps[0] -- guard mirrors the nested-list defense below.
+    stt = _make_raw([])
+    result = await stt.transcribe_segment(np.zeros(16000, dtype=np.float32))
+    assert result.text == "" and result.mean_word_prob == 0.0
+
+
+@pytest.mark.asyncio
+async def test_nested_list_of_lists_hypothesis_is_unwrapped():
+    # Some NeMo versions nest a single-output batch as [[Hypothesis]] instead
+    # of [Hypothesis] -- bench/stt_backend_probe.py._run_transcribe carries
+    # the same unwrap; mirror it here.
+    hyp = _Hyp("nested hello", [0.9, 0.9])
+    stt = _make_raw([[hyp]])
+    result = await stt.transcribe_segment(np.zeros(16000, dtype=np.float32))
+    assert result.text == "nested hello"
+    assert result.mean_word_prob == pytest.approx(0.9)

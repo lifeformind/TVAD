@@ -138,6 +138,8 @@ def _load_score_normalizer(tg: dict):
         cohort = np.load(path)
         if len(cohort) == 0:
             raise ValueError(f"cohort at {path!r} is empty")
+        if cohort.ndim != 2:
+            raise ValueError(f"cohort at {path!r} is not 2-D (shape={cohort.shape})")
         normalizer = AsNorm(cohort, top_k=sn_cfg.get("top_k", 50))
     except (OSError, ValueError) as exc:
         print(f"[assembly] score_norm: cohort load failed ({exc}) — "
