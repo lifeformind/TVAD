@@ -181,6 +181,11 @@ kiosk:
         enabled: true
         window_size: 3
         min_matches: 1
+      # Running enrollment centroid: windows scoring >= threshold+margin
+      # fold into the primary voiceprint (EMA), absorbing far-field drift.
+      # 0.0 disables. Margin is the poison guard.
+      enrollment_update_alpha: 0.10
+      enrollment_update_margin: 0.10
       # Director-11: DOA cone vote — direction as a fourth gate. The tracker
       # samples DOAANGLE/SPEECHDETECTED continuously (a decision-time read
       # would see whatever is loud NOW); segments are scored by circular

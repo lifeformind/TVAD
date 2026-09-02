@@ -173,6 +173,8 @@ def _build_safety_net(tb_cfg: dict, primary_embedding, embedder, bus):
         sr=tb_cfg.get("sample_rate_hz", 16000),
         normalizer=normalizer,
         norm_decides=(norm_mode == "on"),
+        update_alpha=tg.get("enrollment_update_alpha", 0.0),
+        update_margin=tg.get("enrollment_update_margin", 0.10),
     )
     print("[director] safety net ENABLED (accumulated-window ECAPA)",
           file=sys.stderr, flush=True)

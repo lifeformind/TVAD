@@ -125,3 +125,46 @@ def test_no_normalizer_is_todays_behavior():
     net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
     v = net.maybe_verify()
     assert v.norm_score is None and v.smoother_ok is True
+
+
+# --- Task 8: running enrollment centroid (margin-guarded EMA) ---
+
+class _DriftEmb:
+    def extract(self, audio, sample_rate=16000):
+        v = np.array([1.0, 0.3, 0.0, 0.0], dtype=np.float32)
+        return v / np.linalg.norm(v)
+
+
+def test_centroid_moves_toward_confident_matches():
+    emb = _DriftEmb()
+    primary = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    net = SafetyNet(emb, primary, verify_window_ms=100, threshold=0.5,
+                    update_alpha=0.5, update_margin=0.1, sr=16000)
+    net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
+    net.maybe_verify()
+    assert net._primary[1] > 0.0                     # moved toward the window
+    assert np.linalg.norm(net._primary) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_no_update_below_margin():
+    class _WeakEmb:
+        def extract(self, audio, sample_rate=16000):
+            v = np.array([0.6, 0.8, 0.0, 0.0], dtype=np.float32)  # cosine 0.6 vs primary
+            return v / np.linalg.norm(v)
+    primary = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    net = SafetyNet(_WeakEmb(), primary, verify_window_ms=100, threshold=0.55,
+                    update_alpha=0.5, update_margin=0.1, sr=16000)   # 0.6 < 0.55+0.1
+    net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
+    net.maybe_verify()
+    assert np.allclose(net._primary, primary)
+
+
+def test_alpha_zero_never_updates():
+    # same _DriftEmb as above, update_alpha left at default 0.0
+    emb = _DriftEmb()
+    primary = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    net = SafetyNet(emb, primary, verify_window_ms=100, threshold=0.5,
+                    update_margin=0.1, sr=16000)
+    net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
+    net.maybe_verify()
+    assert np.allclose(net._primary, primary)

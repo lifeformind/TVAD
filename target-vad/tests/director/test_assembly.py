@@ -325,6 +325,8 @@ def test_shipped_config_yaml_matches_live_readers():
     assert tb["turn_gate"]["score_norm"]["top_k"] == 50
     assert tb["turn_gate"]["score_norm"]["speaker_threshold_norm"] == 0.0
     assert tb["barge_in"]["speaker_threshold_norm"] == 0.0
+    assert tb["turn_gate"]["enrollment_update_alpha"] == 0.10
+    assert tb["turn_gate"]["enrollment_update_margin"] == 0.10
     # dead keys must be GONE
     assert "decision_smoother" not in full["kiosk"]
     assert "suppression_level" not in tb["aec"]

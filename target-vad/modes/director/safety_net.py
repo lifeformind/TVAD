@@ -37,16 +37,19 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
 class SafetyNet:
     def __init__(self, embedder, primary_embedding, *, verify_window_ms=2000,
                  threshold=0.30, window_size=3, min_matches=1, sr=16000,
-                 normalizer=None, norm_decides: bool = False):
+                 normalizer=None, norm_decides: bool = False,
+                 update_alpha: float = 0.0, update_margin: float = 0.10):
         self._embedder = embedder
         self._primary = np.asarray(primary_embedding, dtype=np.float32)
         self._need = int(sr * verify_window_ms / 1000)
         self._sr = sr
         self._smoother = DecisionSmoother(window_size, min_matches, threshold)
-        self._threshold = threshold
+        self._threshold = threshold            # also the smoother's decide threshold
         self._buf = np.zeros(0, dtype=np.float32)
         self._normalizer = normalizer          # AsNorm (Task 5/7); None = today's raw cosine
         self._norm_decides = norm_decides      # True (mode "on") -> norm_score feeds the smoother
+        self._update_alpha = update_alpha      # Task 8: running enrollment centroid; 0.0 disables
+        self._update_margin = update_margin    # poison guard margin above threshold
 
     def accumulate(self, audio: np.ndarray, is_target: bool) -> None:
         if not is_target:
@@ -64,6 +67,19 @@ class SafetyNet:
         if self._normalizer is not None:
             norm_score = float(self._normalizer.score(self._primary, emb))
         deciding = norm_score if (self._norm_decides and norm_score is not None) else score
+        # Task 8: running enrollment centroid (spec Appendix C: +4.8 F1 far-field
+        # in the Huawei dynamic-enrollment result). Only windows scoring
+        # comfortably above the eject threshold (threshold + margin) may teach
+        # the centroid -- the margin is the poison guard against an impostor
+        # or noise window slowly dragging the voiceprint off the real owner.
+        # update_alpha == 0.0 (code default) disables this entirely. Note:
+        # only SafetyNet's own `_primary` drifts here -- the barge-in path's
+        # session-start `primary_embedding` copy intentionally does not.
+        if self._update_alpha > 0.0 and deciding >= self._threshold + self._update_margin:
+            mixed = (1.0 - self._update_alpha) * self._primary + self._update_alpha * emb
+            n = float(np.linalg.norm(mixed))
+            if n > 0.0:
+                self._primary = (mixed / n).astype(np.float32)
         smoother_ok = self._smoother.update(deciding)
         window_rms = float(np.sqrt(np.mean(np.square(window))))
         # .score stays the raw cosine always (DIAG continuity); the smoother's
