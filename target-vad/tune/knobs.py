@@ -208,8 +208,8 @@ KNOBS: tuple[Knob, ...] = (
          "The Director's single clock source.", min=100, max=2000, step=50),
 
     # ---- Voice Pipeline ----
-    Knob(TB + "stt.model", VOICE, "STT model", "select",
-         "Whisper model for turn transcription.",
+    Knob(TB + "stt.model", VOICE, "STT model (openai-whisper backend)", "select",
+         "Whisper model for turn transcription (openai-whisper backend).",
          "GB10 p95: tiny 67 / base.en 84 / small.en 189 / medium.en 415 ms.",
          choices=("tiny", "base.en", "small.en", "medium.en")),
     Knob(TB + "stt.end_of_utterance_tail_ms", VOICE, "Utterance tail (ms)", "int",

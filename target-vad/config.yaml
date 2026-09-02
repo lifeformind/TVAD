@@ -94,8 +94,12 @@ kiosk:
     stt:
       # Re-backed off faster-whisper (no aarch64 CUDA wheel on GB10) onto
       # openai-whisper (torch, CUDA). See docs/notes/2026-06-22-stt-backend.md.
-      backend: "openai-whisper"   # "openai-whisper" (proven on GB10) | "nemo" (Plan 04 Task 7)
-      model: "small.en"           # GB10 p95: tiny 67ms / base.en 84ms / small.en 189ms / medium.en 415ms (word_timestamps on, self.wav 3s). small.en = accuracy/latency balance for uncommon words
+      # backend is LIVE: Task 9's spike (2026-09) was GO — nvidia/parakeet-tdt-0.6b-v2
+      # via NeMo transcribes self.wav exactly at ~70ms mean on CUDA, so "nemo" is
+      # now the default. "openai-whisper" remains the tested fallback.
+      backend: "nemo"              # "nemo" (Parakeet-TDT, spike-verified 2026-09) | "openai-whisper" (proven fallback on GB10)
+      model: "small.en"           # openai-whisper backend only. GB10 p95: tiny 67ms / base.en 84ms / small.en 189ms / medium.en 415ms (word_timestamps on, self.wav 3s). small.en = accuracy/latency balance for uncommon words
+      nemo_model: "nvidia/parakeet-tdt-0.6b-v2"   # used when backend: "nemo"; spike-verified 2026-09
       device: "cuda"              # GB10 CUDA; fallback is NOT supported (faster-whisper banned)
       end_of_utterance_tail_ms: 400
       # mean_word_prob from StreamingStt feeds the Director's empty/low-confidence

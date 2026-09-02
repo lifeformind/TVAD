@@ -5,6 +5,7 @@ event prints emitted from ONE owner (no double [HANDOFF])."""
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
 from core.vad.silero_vad import SpeechSegment
 from modes.talkback.handoff import DirectorResult
@@ -304,3 +305,96 @@ def test_transient_epipe_on_doa_probe_recovers_by_retry(monkeypatch):
     printed = " ".join(str(c) for c in console.print.call_args_list)
     assert "DOA control readable" in printed
     assert attempts["n"] == 2
+
+
+# ---- _build_runtime: stt.backend selector (Task 10, NemoStt) ----
+
+class _FakeStreamingStt:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def _ensure_model(self):
+        pass
+
+
+class _FakeNemoStt:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def _ensure_model(self):
+        pass
+
+
+class _FakeLlmClient:
+    def __init__(self, **kwargs):
+        pass
+
+    async def ping(self):
+        return True
+
+
+class _FakeTtsEngine:
+    def __init__(self, **kwargs):
+        pass
+
+    def _ensure_model(self):
+        pass
+
+
+class _FakePlayer:
+    def __init__(self, **kwargs):
+        pass
+
+
+class _FakeEventLogger:
+    def __init__(self, **kwargs):
+        pass
+
+
+def _patch_build_runtime_deps(monkeypatch):
+    # _build_runtime imports these locally, so patching the source modules'
+    # attributes (not kiosk's namespace) is what the local `from x import Y`
+    # actually resolves at call time.
+    monkeypatch.setattr("modes.talkback.stt.StreamingStt", _FakeStreamingStt)
+    monkeypatch.setattr("modes.talkback.stt_nemo.NemoStt", _FakeNemoStt)
+    monkeypatch.setattr("modes.talkback.llm.LlmClient", _FakeLlmClient)
+    monkeypatch.setattr("modes.talkback.tts.TtsEngine", _FakeTtsEngine)
+    monkeypatch.setattr("modes.talkback.player.Player", _FakePlayer)
+    monkeypatch.setattr("core.logging.jsonl_logger.EventLogger", _FakeEventLogger)
+
+
+def _talkback_config(stt_cfg=None):
+    cfg = _config()
+    if stt_cfg is not None:
+        cfg["kiosk"]["talkback"]["stt"] = stt_cfg
+    return cfg
+
+
+def test_build_runtime_selects_nemo_stt_backend(monkeypatch):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _talkback_config({"backend": "nemo", "nemo_model": "nvidia/parakeet-tdt-0.6b-v2"})
+    runtime = kiosk._build_runtime(cfg)
+    assert isinstance(runtime._stt, _FakeNemoStt)
+    assert runtime._stt.kwargs["model"] == "nvidia/parakeet-tdt-0.6b-v2"
+
+
+@pytest.mark.parametrize("stt_cfg", [None, {"backend": "openai-whisper"}])
+def test_build_runtime_defaults_to_streaming_stt_backend(monkeypatch, stt_cfg):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _talkback_config(stt_cfg)
+    runtime = kiosk._build_runtime(cfg)
+    assert isinstance(runtime._stt, _FakeStreamingStt)
+
+
+def test_build_runtime_unknown_backend_exits(monkeypatch):
+    import kiosk
+
+    _patch_build_runtime_deps(monkeypatch)
+    cfg = _talkback_config({"backend": "vosk"})
+    with pytest.raises(SystemExit) as exc:
+        kiosk._build_runtime(cfg)
+    assert exc.value.code == 3

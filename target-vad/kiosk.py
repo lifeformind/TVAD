@@ -222,10 +222,21 @@ def _build_runtime(config: dict) -> _LazyDirectorRuntime:
     )
 
     stt_cfg = tb_cfg.get("stt", {})
-    stt = StreamingStt(
-        model=stt_cfg.get("model", "base.en"),
-        device=stt_cfg.get("device", "cuda"),
-    )
+    backend = stt_cfg.get("backend", "openai-whisper")
+    if backend == "nemo":
+        from modes.talkback.stt_nemo import NemoStt
+        stt = NemoStt(
+            model=stt_cfg.get("nemo_model", "nvidia/parakeet-tdt-0.6b-v2"),
+            device=stt_cfg.get("device", "cuda"),
+        )
+    elif backend == "openai-whisper":
+        stt = StreamingStt(
+            model=stt_cfg.get("model", "base.en"),
+            device=stt_cfg.get("device", "cuda"),
+        )
+    else:
+        console.print(f"[red]Unknown stt.backend: {backend!r}[/red]")
+        sys.exit(3)
     llm_cfg = tb_cfg.get("llm", {})
     grammar = None
     if llm_cfg.get("no_markdown_grammar", False) is True:
