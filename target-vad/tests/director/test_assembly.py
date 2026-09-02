@@ -323,6 +323,7 @@ def test_shipped_config_yaml_matches_live_readers():
     assert tb["turn_gate"]["score_norm"]["mode"] == "shadow"
     assert tb["turn_gate"]["score_norm"]["cohort_path"] == "./voiceprints/cohort.npy"
     assert tb["turn_gate"]["score_norm"]["top_k"] == 50
+    assert tb["turn_gate"]["score_norm"]["speaker_threshold_norm"] == 0.0
     assert tb["barge_in"]["speaker_threshold_norm"] == 0.0
     # dead keys must be GONE
     assert "decision_smoother" not in full["kiosk"]

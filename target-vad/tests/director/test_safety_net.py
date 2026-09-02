@@ -90,6 +90,23 @@ def test_shadow_mode_logs_norm_but_raw_decides():
     assert v.smoother_ok is True
 
 
+def test_shadow_mode_raw_decides_even_when_norm_disagrees():
+    # Discriminates the norm_decides gate: norm score (-1.0) sits on the
+    # OPPOSITE side of threshold 0.5 from raw cosine (1.0). If a regression
+    # ever dropped the `if self._norm_decides` check (feeding norm_score to
+    # the smoother unconditionally), this would flip to smoother_ok=False.
+    emb = _Emb()
+    primary = emb.extract(np.zeros(4))
+    class _OppositeNorm:
+        def score(self, enroll, test): return -1.0
+    net = SafetyNet(emb, primary, verify_window_ms=100, threshold=0.5,
+                    normalizer=_OppositeNorm(), norm_decides=False, sr=16000)
+    net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
+    v = net.maybe_verify()
+    assert v.norm_score == -1.0
+    assert v.smoother_ok is True              # raw cosine 1.0 >= 0.5 decided, not norm
+
+
 def test_on_mode_normalized_score_feeds_smoother():
     emb = _Emb()
     primary = emb.extract(np.zeros(4))
