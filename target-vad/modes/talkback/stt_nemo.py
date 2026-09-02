@@ -8,8 +8,17 @@ on machines without nemo (conftest does not stub it).
 Confidence: nvidia/parakeet-tdt-0.6b-v2 ships with word_confidence OFF by
 default (hyp.word_confidence exists on every Hypothesis but is empty). Task
 9's spike (docs: .superpowers/sdd/2026-09-02-quick-wins-upgrades/task-9-report.md
-section 5) proved the one-time decoding-strategy change below turns it on;
-that invocation is baked into _ensure_model() verbatim.
+section 5) proved the one-time decoding-strategy change below turns it on.
+
+Confidence METHOD matters as much as turning it on: the spike's default
+method_cfg (name="entropy") measured mean_word_prob=0.24 on an exact-match
+transcript of self.wav — well under the reducer's conf_floor (0.5), which
+would have silently RESTORE'd every genuine turn as non-content. Switching
+method_cfg to name="max_prob" (softmax-probability-scale confidence, the
+scale whisper's word probabilities were tuned against) measured
+mean=0.989 (self.wav) / mean=0.957 (other.wav) on the same exact transcripts
+-- see task-10-report.md section "Confidence method fix" for the full
+before/after. max_prob is baked into _ensure_model() below.
 """
 import asyncio
 
@@ -29,7 +38,8 @@ class NemoStt:
             return
         import nemo.collections.asr as nemo_asr
         from omegaconf import open_dict
-        from nemo.collections.asr.parts.utils.asr_confidence_utils import ConfidenceConfig
+        from nemo.collections.asr.parts.utils.asr_confidence_utils import (
+            ConfidenceConfig, ConfidenceMethodConfig)
 
         model = nemo_asr.models.ASRModel.from_pretrained(self._model_name)
         model = model.to(self._device).eval()
@@ -39,12 +49,21 @@ class NemoStt:
         # a pre-existing key on the TDT/RNNT decoding schema, so a plain
         # attribute-set raises "Key 'confidence_cfg' is not in struct" without
         # open_dict() disabling struct-mode just long enough to add the key.
+        #
+        # method_cfg name="max_prob" (NOT the default "entropy"): entropy-scale
+        # confidence measured mean_word_prob=0.24 on an exact-match transcript
+        # (self.wav) -- below conf_floor (0.5), so every genuine turn would be
+        # RESTORE'd as non-content. max_prob is softmax-probability-scale, the
+        # same scale whisper's word probabilities (and conf_floor) were tuned
+        # against; measured mean=0.989 (self.wav) / 0.957 (other.wav) on the
+        # same exact transcripts (see task-10-report.md).
         decoding_cfg = model.cfg.decoding
         with open_dict(decoding_cfg):
             decoding_cfg.confidence_cfg = ConfidenceConfig(
                 preserve_word_confidence=True,
                 preserve_token_confidence=True,
                 preserve_frame_confidence=False,
+                method_cfg=ConfidenceMethodConfig(name="max_prob"),
             )
         model.change_decoding_strategy(decoding_cfg)
 
