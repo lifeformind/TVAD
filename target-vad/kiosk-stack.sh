@@ -19,6 +19,12 @@ PORT=8080
 CHAT_FORMAT=""
 READY_TIMEOUT_S=120
 
+# Native llama.cpp server (replaces python -m llama_cpp.server; needed for
+# Gemma 4 MoE day-one support, per-request GBNF grammar, and slot prompt
+# caching). Built by `kiosk-stack.sh build-server`.
+LLAMA_CPP_DIR="$HOME/.local/opt/llama.cpp"
+LLAMA_SERVER_BIN="$LLAMA_CPP_DIR/build/bin/llama-server"
+
 PID_FILE="$SCRIPT_DIR/.llm.pid"
 LOG_DIR="$SCRIPT_DIR/logs"
 LLM_LOG="$LOG_DIR/llm.log"
@@ -81,6 +87,17 @@ cmd_build() {
     err "The CUDA build did not take effect. Check CUDA toolkit / arch and retry."
     exit 1
   fi
+}
+cmd_build_server() {
+  # Native llama.cpp with CUDA for the GB10 (Blackwell, sm_121).
+  if [[ ! -d "$LLAMA_CPP_DIR" ]]; then
+    git clone https://github.com/ggml-org/llama.cpp "$LLAMA_CPP_DIR"
+  fi
+  git -C "$LLAMA_CPP_DIR" pull --ff-only
+  cmake -S "$LLAMA_CPP_DIR" -B "$LLAMA_CPP_DIR/build" \
+    -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=121 -DCMAKE_BUILD_TYPE=Release
+  cmake --build "$LLAMA_CPP_DIR/build" --target llama-server -j "$(nproc)"
+  "$LLAMA_SERVER_BIN" --version
 }
 cmd_status() {
   local pid; pid="$(llm_pid)"
@@ -230,7 +247,7 @@ cmd_tune() {
 
 usage() {
   cat <<EOF
-Usage: $0 {start|tune|stop|status|build-llm|download-model}
+Usage: $0 {start|tune|stop|status|build-llm|build-server|download-model}
   start          bring up the LLM (GPU) then run the kiosk in the foreground
   tune           bring up the LLM, then the tuning console with the kiosk
                  auto-started under it (extra args pass through, e.g.
@@ -238,6 +255,7 @@ Usage: $0 {start|tune|stop|status|build-llm|download-model}
   stop           full shutdown: stop the kiosk (any launch mode) and the LLM server
   status         show LLM / model / GPU status
   build-llm      one-time: rebuild llama-cpp-python with CUDA (sm_121)
+  build-server   one-time: build native llama-server with CUDA (sm_121)
   download-model one-time: download the q5 GGUF into the HF cache
 EOF
 }
@@ -250,6 +268,7 @@ main() {
     stop)           cmd_stop ;;
     status)         cmd_status ;;
     build-llm)      cmd_build ;;
+    build-server)   cmd_build_server ;;
     download-model) cmd_download ;;
     "")             usage; exit 1 ;;
     *)              err "Unknown command: $cmd"; usage; exit 2 ;;
