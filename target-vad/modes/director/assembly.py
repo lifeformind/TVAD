@@ -119,7 +119,30 @@ def _build_vision(tb_cfg: dict, *, bus):
         backend, bus, fps=v.get("fps", 3.0),
         present_after_s=v.get("present_after_s", 1.0),
         absent_after_s=v.get("absent_after_s", 2.0),
-        enroll_frames=v.get("enroll_frames", 8))
+        enroll_frames=v.get("enroll_frames", 8),
+        preview_sink=_build_preview_sink(v.get("preview", {})))
+
+
+def _build_preview_sink(p_cfg: dict):
+    """Tuning-console camera preview: annotate + atomically publish each frame
+    the vision loop classifies. None (off) unless preview.enabled is a real
+    boolean True (strict-bool, same 'flase' rule as vision.enabled)."""
+    enabled = p_cfg.get("enabled", False)
+    if enabled is not True:
+        if "enabled" in p_cfg and not isinstance(enabled, bool):
+            print(f"[director] vision.preview.enabled is not a boolean (got "
+                  f"{enabled!r}) -> preview off", file=sys.stderr, flush=True)
+        return None
+    from modes.director.vision.preview import annotate, write_jpeg_atomic
+    path = p_cfg.get("path", "/dev/shm/tvad-vision-preview.jpg")
+
+    def sink(frame, detail):
+        write_jpeg_atomic(
+            annotate(frame, box=detail.get("box"), score=detail.get("score"),
+                     raw_present=detail.get("raw_present", False),
+                     stable=detail.get("stable", "?")),
+            path)
+    return sink
 
 
 def _load_score_normalizer(tg: dict):

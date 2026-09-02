@@ -10,7 +10,7 @@ from typing import Optional
 import numpy as np
 
 from modes.director.events import PresenceStatus
-from modes.director.vision.classify import classify_presence
+from modes.director.vision.classify import classify_presence, cosine
 
 CACHE = pathlib.Path.home() / ".cache" / "target-vad" / "vision"
 YUNET_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/"
@@ -47,6 +47,10 @@ class OpenCvBackend:
         self._cap = None
         self._det = None
         self._rec = None
+        # Preview side channel (see make_classify_fn)
+        self.last_box = None
+        self.last_score = None
+        self.last_raw_present = False
 
     def open(self) -> bool:
         self._det = self._rec = None
@@ -89,6 +93,14 @@ class OpenCvBackend:
             return None
         return max(faces, key=lambda f: float(f[2]) * float(f[3]))
 
+    def detect_box(self, frame):
+        """Largest-face box (x, y, w, h) or None — public for the tuning
+        console's direct preview (no identity scoring)."""
+        f = self._largest_face(frame)
+        if f is None:
+            return None
+        return (float(f[0]), float(f[1]), float(f[2]), float(f[3]))
+
     def embed(self, frame) -> Optional[np.ndarray]:
         f = self._largest_face(frame)
         if f is None:
@@ -97,20 +109,28 @@ class OpenCvBackend:
         return self._rec.feature(aligned).ravel().copy()
 
     def make_classify_fn(self, reference):
-        """Bind classify_presence to live detect+embed of the largest central face."""
+        """Bind classify_presence to live detect+embed of the largest central face.
+        Side channel for the tuning-console preview: each call stashes what it saw
+        (last_box/last_score/last_raw_present) on the backend."""
         def classify_fn(frame) -> PresenceStatus:
             h, w = frame.shape[:2]
             f = self._largest_face(frame)
             if f is None:
+                self.last_box = self.last_score = None
+                self.last_raw_present = False
                 return classify_presence(None, None, w, h, reference,
                                          identity_threshold=self._thr,
                                          min_area_frac=self._min_area)
             box = (float(f[0]), float(f[1]), float(f[2]), float(f[3]))
             aligned = self._rec.alignCrop(frame, f)
             emb = self._rec.feature(aligned).ravel()
-            return classify_presence(emb, box, w, h, reference,
-                                     identity_threshold=self._thr,
-                                     min_area_frac=self._min_area)
+            status = classify_presence(emb, box, w, h, reference,
+                                       identity_threshold=self._thr,
+                                       min_area_frac=self._min_area)
+            self.last_box = box
+            self.last_score = cosine(emb, reference)
+            self.last_raw_present = status is PresenceStatus.PRESENT
+            return status
         return classify_fn
 
     def close(self) -> None:
@@ -122,3 +142,7 @@ class OpenCvBackend:
             self._cap = None
         self._det = None
         self._rec = None
+        # Preview side channel (see make_classify_fn)
+        self.last_box = None
+        self.last_score = None
+        self.last_raw_present = False

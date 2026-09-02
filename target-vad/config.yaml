@@ -289,6 +289,13 @@ kiosk:
       owner_absent_grace_s: 3.0 # sustained ABSENT this long => free the kiosk
       active_talk_guard_s: 3.0  # never owner-absent-end within this of owner speech
       enroll_frames: 8          # owner face-reference frames captured at session start
+      # Tuning-console camera preview: the vision loop publishes each classified
+      # frame (face box + SFace cos + raw/debounced verdict drawn on) as an
+      # atomic JPEG the tune server relays. Only a real boolean true enables.
+      # Added after 2026-09-02 live test: false ABSENT verdicts were invisible.
+      preview:
+        enabled: true
+        path: "/dev/shm/tvad-vision-preview.jpg"
 
     logging:
       jsonl_path: "logs/kiosk-{date}-{session_id}.jsonl"

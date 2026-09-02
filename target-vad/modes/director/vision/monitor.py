@@ -15,6 +15,11 @@ class PresenceMonitor:
         self._emitted: PresenceStatus = PresenceStatus.ABSENT  # last status we returned as a change
         self._unavailable = False
 
+    @property
+    def current(self) -> str:
+        """Latest stable status name (preview display; ABSENT until first emit)."""
+        return self._emitted.name
+
     def observe(self, frame, now: float) -> Optional[PresenceStatus]:
         if frame is None:
             return self._go_unavailable()

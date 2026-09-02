@@ -62,6 +62,14 @@
   .l-diag { color:#7fb3d5; } .l-reject { color:var(--bad); }
   .l-wake { color:#c39be0; } .l-session { color:var(--ok); }
   .l-trace { color:var(--warn); }
+  #campanel { position:fixed; right:14px; bottom:110px; z-index:20;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px;
+    padding:8px; display:none; box-shadow:0 4px 18px rgba(0,0,0,.5); }
+  #campanel.show { display:block; }
+  #campanel img { display:block; width:320px; height:180px; object-fit:contain;
+    background:#000; border-radius:4px; }
+  #camstatus { color:var(--dim); font-size:12px; font-family:var(--mono);
+    margin-top:5px; max-width:320px; }
 </style>
 </head>
 <body>
@@ -86,7 +94,12 @@
   <button class="primary" id="restartbtn">Restart</button>
   <span id="restarthint">config changed — restart to apply</span>
   <span style="flex:1"></span>
+  <button class="ghost" id="camerabtn">Camera</button>
   <button class="ghost" id="clearlog">Clear log</button>
+</div>
+<div id="campanel">
+  <img id="camimg" alt="camera preview">
+  <div id="camstatus">connecting…</div>
 </div>
 <pre id="logpane"></pre>
 <script>
@@ -279,6 +292,34 @@ $("logpane").onscroll = () => {
   autoscroll = p.scrollTop + p.clientHeight >= p.scrollHeight - 8;
 };
 new EventSource("/api/logs").onmessage = ev => logLine(ev.data);
+
+// Camera preview: kiosk-published annotated frames while running, the server's
+// direct grabber while stopped. Polls ONLY while the panel is open (keeps the
+// camera free otherwise). fetch (not img.src) so 503 reasons reach the user.
+let camTimer = null, camUrl = null;
+async function camTick() {
+  try {
+    const r = await fetch(`/api/vision/frame?t=${Date.now()}`);
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      $("camstatus").textContent = data.error || `error ${r.status}`;
+      return;
+    }
+    const blob = await r.blob();
+    if (camUrl) URL.revokeObjectURL(camUrl);
+    camUrl = URL.createObjectURL(blob);
+    $("camimg").src = camUrl;
+    $("camstatus").textContent = lastKiosk.running
+      ? "live (kiosk vision loop)" : "live (direct — kiosk stopped)";
+  } catch (e) { $("camstatus").textContent = "server unreachable"; }
+}
+$("camerabtn").onclick = () => {
+  const panel = $("campanel");
+  const show = !panel.classList.contains("show");
+  panel.classList.toggle("show", show);
+  if (show) { camTick(); camTimer = setInterval(camTick, 1000); }
+  else if (camTimer) { clearInterval(camTimer); camTimer = null; }
+};
 
 poll(true).then(() => setInterval(() => poll(false), 3000));
 </script>

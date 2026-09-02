@@ -31,3 +31,29 @@ def test_malformed_enabled_warns(capsys):
     # A malformed value must be visible, not silently off.
     _build_vision({"vision": {"enabled": "flase"}}, bus=object())
     assert "flase" in capsys.readouterr().err
+
+
+def test_preview_sink_wired_when_enabled(monkeypatch):
+    import modes.director.assembly as A
+    monkeypatch.setattr(A, "_cv2_available", lambda: True)
+    w = _build_vision({"vision": {"enabled": True,
+                                  "preview": {"enabled": True,
+                                              "path": "/dev/shm/x.jpg"}}},
+                      bus=object())
+    assert w is not None and w._preview_sink is not None
+
+
+def test_preview_off_by_default(monkeypatch):
+    import modes.director.assembly as A
+    monkeypatch.setattr(A, "_cv2_available", lambda: True)
+    w = _build_vision({"vision": {"enabled": True}}, bus=object())
+    assert w is not None and w._preview_sink is None
+
+
+def test_preview_strict_bool_warns_and_disables(monkeypatch, capsys):
+    import modes.director.assembly as A
+    monkeypatch.setattr(A, "_cv2_available", lambda: True)
+    w = _build_vision({"vision": {"enabled": True,
+                                  "preview": {"enabled": "true"}}}, bus=object())
+    assert w is not None and w._preview_sink is None
+    assert "preview.enabled" in capsys.readouterr().err

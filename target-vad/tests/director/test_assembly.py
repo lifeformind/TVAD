@@ -360,5 +360,7 @@ def test_shipped_config_yaml_matches_live_readers():
     assert "partials_every_ms" not in tb["stt"]
     assert "require_speaker_match" not in tb["barge_in"]
     assert "audio_safety_net" not in tb["vision"]
+    assert tb["vision"]["preview"]["enabled"] is True
+    assert tb["vision"]["preview"]["path"] == "/dev/shm/tvad-vision-preview.jpg"
     assert "resume" not in tb
     assert "include_partial_transcripts" not in tb["logging"]

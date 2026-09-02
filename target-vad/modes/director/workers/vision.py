@@ -19,9 +19,10 @@ from modes.director.vision.monitor import PresenceMonitor
 
 class VisionWorker:
     def __init__(self, backend, bus, *, fps, present_after_s, absent_after_s,
-                 enroll_frames, clock=time.monotonic):
+                 enroll_frames, clock=time.monotonic, preview_sink=None):
         self._backend = backend
         self._bus = bus
+        self._preview_sink = preview_sink   # callable(frame, detail) | None
         self._period = 1.0 / fps if fps > 0 else 0.0
         self._present_after_s = present_after_s
         self._absent_after_s = absent_after_s
@@ -55,6 +56,16 @@ class VisionWorker:
             return None                          # enroll failed; stay UNAVAILABLE
         frame = self._backend.grab()
         status = self._monitor.observe(frame, now)
+        if self._preview_sink is not None and frame is not None:
+            try:
+                self._preview_sink(frame, {
+                    "box": getattr(self._backend, "last_box", None),
+                    "score": getattr(self._backend, "last_score", None),
+                    "raw_present": getattr(self._backend, "last_raw_present", False),
+                    "stable": self._monitor.current,
+                })
+            except Exception:              # noqa: BLE001 — preview is best-effort
+                pass
         return OwnerPresenceEvent(status, now) if status is not None else None
 
     def _emit(self, ev: OwnerPresenceEvent) -> None:

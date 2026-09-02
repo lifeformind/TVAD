@@ -60,10 +60,17 @@ def _coerce(knob: knobs.Knob, value):
 class TuningServer:
     def __init__(self, config_path: str, kproc, host: str = "127.0.0.1",
                  port: int = 8765,
-                 llm_url: str = "http://127.0.0.1:8080/v1/models"):
+                 llm_url: str = "http://127.0.0.1:8080/v1/models",
+                 grabber_factory=None):
         self.config_path = os.path.abspath(config_path)
         self.kproc = kproc
         self.llm_url = llm_url
+        # Camera preview fallback for when the kiosk is NOT running: a direct
+        # grabber the server owns (V4L2 access is exclusive, so it must be
+        # released before the kiosk child starts — see the start route).
+        self._grabber_factory = grabber_factory
+        self._grabber = None
+        self._grabber_lock = threading.Lock()
         # Probe target = (host, port) only. The reachability check must be a
         # bare TCP connect, never an HTTP request: llama-cpp-python's
         # interrupt_requests (default true) aborts any in-flight streaming
@@ -114,9 +121,22 @@ class TuningServer:
                     return self._index()
                 if self.path == "/api/state":
                     return self._json(200, server_ref.state())
+                if self.path.split("?")[0] == "/api/vision/frame":
+                    status, payload = server_ref.vision_frame()
+                    if status == 200:
+                        return self._image(payload)
+                    return self._json(status, payload)
                 if self.path == "/api/logs":
                     return self._sse()
                 self._json(404, {"error": f"no route: {self.path}"})
+
+            def _image(self, body: bytes) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
 
             def _route_post(self):
                 n = int(self.headers.get("Content-Length") or 0)
@@ -128,8 +148,13 @@ class TuningServer:
                     status, payload = server_ref.save(body)
                     return self._json(status, payload)
                 if self.path == "/api/kiosk/start":
-                    return self._kiosk(lambda: server_ref.kproc.start(
-                        diag=bool((body or {}).get("diag", True))))
+                    def _start():
+                        # The kiosk's VisionWorker needs the camera; release
+                        # our direct grabber BEFORE the child process spawns.
+                        server_ref.release_grabber()
+                        server_ref.kproc.start(
+                            diag=bool((body or {}).get("diag", True)))
+                    return self._kiosk(_start)
                 if self.path == "/api/kiosk/stop":
                     return self._kiosk(server_ref.kproc.stop)
                 if self.path == "/api/kiosk/restart":
@@ -226,6 +251,54 @@ class TuningServer:
                 os.unlink(tmp)
             raise
 
+    _PREVIEW_FRESH_S = 5.0
+
+    def vision_frame(self) -> tuple[int, "bytes | dict"]:
+        """(200, jpeg bytes) or (503, error dict). Kiosk running: relay the
+        vision loop's atomic preview file if fresh. Stopped: direct grabber."""
+        if self.kproc.status().get("running"):
+            path = self._preview_path()
+            try:
+                if time.time() - os.stat(path).st_mtime <= self._PREVIEW_FRESH_S:
+                    return 200, Path(path).read_bytes()
+                return 503, {"error": "kiosk preview stale (vision preview off "
+                                      "or vision unavailable?)"}
+            except OSError:
+                return 503, {"error": "kiosk running but no preview file yet "
+                                      "(vision.preview.enabled?)"}
+        with self._grabber_lock:
+            if self._grabber is None:
+                factory = self._grabber_factory or self._default_grabber
+                try:
+                    self._grabber = factory()
+                except Exception as e:  # noqa: BLE001 — camera genuinely absent
+                    return 503, {"error": f"camera unavailable: {e}"}
+            jpeg = self._grabber.grab_jpeg()
+        if jpeg is None:
+            return 503, {"error": "camera grab failed (device busy or absent?)"}
+        return 200, jpeg
+
+    def _preview_path(self) -> str:
+        try:
+            data = yaml.safe_load(Path(self.config_path).read_text())
+            v = data["kiosk"]["talkback"].get("vision", {}).get("preview", {})
+            return v.get("path", "/dev/shm/tvad-vision-preview.jpg")
+        except Exception:  # noqa: BLE001 — config unreadable -> default path
+            return "/dev/shm/tvad-vision-preview.jpg"
+
+    def _default_grabber(self):
+        from tune.vision_preview import DirectGrabber
+        data = yaml.safe_load(Path(self.config_path).read_text())
+        return DirectGrabber(data["kiosk"]["talkback"].get("vision", {}))
+
+    def release_grabber(self) -> None:
+        with self._grabber_lock:
+            if self._grabber is not None:
+                try:
+                    self._grabber.close()
+                finally:
+                    self._grabber = None
+
     def _llm_reachable(self) -> bool:
         """Bare TCP connect — see the __init__ comment on _llm_addr for why
         this must never be an HTTP request against the llama server."""
@@ -244,5 +317,6 @@ class TuningServer:
         self.httpd.serve_forever()
 
     def shutdown(self):
+        self.release_grabber()
         self.httpd.shutdown()
         self.httpd.server_close()
