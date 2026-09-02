@@ -55,7 +55,8 @@ def reduce(state: State, ctx: Context, event) -> tuple:
             return State.EVALUATING, []
         return state, []
     if isinstance(event, E.NearFieldOnset) and state is State.SPEAKING:
-        if (event.is_target and event.rms >= ctx.proximity_rms
+        onset_floor = max(ctx.proximity_rms, ctx.cfg.onset_floor_speaking)
+        if (event.is_target and event.rms >= onset_floor
                 and in_owner_cone(ctx, event.doa_angle) is not False):
             ctx.ducked = True
             return State.EVALUATING, [C.Duck(ctx.cfg.duck_level)]
@@ -291,15 +292,34 @@ def _restore_speaking(ctx: Context) -> tuple:
     return State.SPEAKING, [C.Restore()]
 
 
-def _on_interjection_segment(ctx: Context, ev: E.InterjectionSegment) -> tuple:
-    # Reject ladder (spec s6) — NEVER cut on these; always RESTORE.
+def interjection_reject_reason(ctx: Context, ev: E.InterjectionSegment):
+    """The interjection reject ladder (spec s6), as a pure reason. None = accept.
+    Single source of truth: _on_interjection_segment decides with it, and the
+    runtime's DIAG line prints it — decision and diagnosis can't drift."""
     if ev.rms < ctx.proximity_rms:                       # proximity pre-gate
-        return _restore_speaking(ctx)
+        return "too_quiet"
     if cone_vote(ctx, ev.doa_angles) is False:           # wrong direction (Director-11)
-        return _restore_speaking(ctx)
+        return "out_of_cone"
     if ev.duration_ms < ctx.cfg.verify_window_ms:        # too short to verify
-        return _restore_speaking(ctx)
+        return "too_short"
     if ev.speaker_score < ctx.cfg.speaker_threshold:     # not the primary speaker
+        return "speaker_mismatch"
+    return None
+
+
+def interjection_diag_line(ctx: Context, ev: E.InterjectionSegment):
+    """DIAG-only formatting for a rejected interjection (None when accepted).
+    Pure — the runtime prints. Live 2026-09-02: Restore storms were unexplained."""
+    reason = interjection_reject_reason(ctx, ev)
+    if reason is None:
+        return None
+    return (f"interjection REJECT={reason} rms={ev.rms:.4f} "
+            f"dur={ev.duration_ms:.0f}ms score={ev.speaker_score:.3f}")
+
+
+def _on_interjection_segment(ctx: Context, ev: E.InterjectionSegment) -> tuple:
+    # NEVER cut on a rejected interjection; always RESTORE.
+    if interjection_reject_reason(ctx, ev) is not None:
         return _restore_speaking(ctx)
     return State.EVALUATING, [C.AccumulateSpeakerAudio(seq=ev.seq),
                               C.TranscribeInterjection(seq=ev.seq)]

@@ -17,6 +17,13 @@ class DirectorConfig:
     speaker_threshold: float = 0.20      # barge_in.speaker_threshold (config.yaml)
     conf_floor: float = 0.5             # NEW: mean_word_prob below this => RESTORE
     duck_level: float = 0.35            # barge_in.duck_level: partial duck keeps the reply tail audible when an interjection is rejected (was 0.15 = near-silent -> lost tails)
+    # Onset floor while SPEAKING (barge_in.onset_floor_speaking): residual TTS
+    # echo survives the array's AEC attenuated but speech-shaped, and the capped
+    # proximity floor (0.05) sits far below real barge-in levels (owner 0.5+
+    # live 2026-09-02) — so echo ducked the reply constantly (audible pumping).
+    # The duck gate uses max(proximity_rms, this). 0.0 = proximity floor alone
+    # (pre-change behavior).
+    onset_floor_speaking: float = 0.0
     # Camera floor control (Director-07, spec §8). Presence is an ADD-ON: these
     # never touch the silence timeout above; they only add an owner-absent end.
     owner_absent_grace_s: float = 3.0   # sustained ABSENT this long => free the kiosk

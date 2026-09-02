@@ -323,6 +323,13 @@ def test_nudge_lead_and_conf_floor_are_mapped():
     assert cfg.conf_floor == 0.65
 
 
+def test_onset_floor_speaking_is_mapped():
+    from modes.director.assembly import _director_config_from
+    cfg = _director_config_from({"barge_in": {"onset_floor_speaking": 0.22}})
+    assert cfg.onset_floor_speaking == 0.22
+    assert _director_config_from({}).onset_floor_speaking == 0.0
+
+
 def test_shipped_config_yaml_matches_live_readers():
     import yaml
     with open("config.yaml") as f:
@@ -336,6 +343,7 @@ def test_shipped_config_yaml_matches_live_readers():
     assert tb["lockout_idle_after_s"] == 5
     assert tb["nudge_lead_s"] == 5.0
     assert tb["barge_in"]["conf_floor"] == 0.5
+    assert tb["barge_in"]["onset_floor_speaking"] == 0.15
     assert tb["watchdog"]["tick_ms"] == 500
     assert tb["turn_gate"]["score_norm"]["mode"] == "shadow"
     assert tb["turn_gate"]["score_norm"]["cohort_path"] == "./voiceprints/cohort.npy"

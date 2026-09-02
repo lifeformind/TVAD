@@ -14,7 +14,8 @@ import sys
 
 from modes.director.result import DirectorResult
 from modes.director import commands as C
-from modes.director.reducer import cone_diag, gate_diag_reason, safety_diag_line
+from modes.director.reducer import (cone_diag, gate_diag_reason,
+                                    interjection_diag_line, safety_diag_line)
 from modes.director import events as E
 
 _DIAG = bool(os.environ.get("TVAD_DIAG"))
@@ -94,6 +95,10 @@ class DirectorRuntime:
                               f"prox={self._director.ctx.proximity_rms:.4f} "
                               f"presence={self._director.ctx.presence_status.name} "
                               f"{cone_diag(self._director.ctx, event.doa_angles)}")
+                if _DIAG and isinstance(event, E.InterjectionSegment):
+                    line = interjection_diag_line(self._director.ctx, event)
+                    if line is not None:
+                        _diag(line)
                 if _DIAG and isinstance(event, E.SpeakerWindowVerdict):
                     _diag(safety_diag_line(self._director.ctx, event, commands))
                 for command in commands:

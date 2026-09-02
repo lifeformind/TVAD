@@ -153,6 +153,10 @@ KNOBS: tuple[Knob, ...] = (
          "Partial (not near-silent) so a rejected interjection doesn't lose the "
          "reply's tail; louder duck = more self-voice for the AEC to cancel.",
          min=0.0, max=1.0, step=0.05),
+    Knob(TB + "barge_in.onset_floor_speaking", BARGE, "Onset floor while speaking (RMS)", "float",
+         "Extra RMS floor for duck-at-onset while TTS plays; 0 disables.",
+         "Residual TTS echo ducked replies constantly (2026-09-02); owner barge-ins run 0.5+.",
+         min=0.0, max=1.0, step=0.01),
     Knob(TB + "barge_in.duck_ramp_ms", BARGE, "Duck ramp (ms)", "int",
          "Gain ramp time into/out of the duck.", min=0, max=500, step=10),
     Knob(TB + "barge_in.proximity.enabled", BARGE, "Proximity gate", "bool",

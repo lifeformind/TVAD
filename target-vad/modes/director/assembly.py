@@ -211,6 +211,7 @@ def _director_config_from(tb_cfg: dict, score_norm_mode: Optional[str] = None) -
         speaker_threshold=speaker_threshold,
         conf_floor=barge.get("conf_floor", 0.5),
         duck_level=barge.get("duck_level", 0.35),
+        onset_floor_speaking=barge.get("onset_floor_speaking", 0.0),
         owner_absent_grace_s=vision.get("owner_absent_grace_s", 3.0),
         active_talk_guard_s=vision.get("active_talk_guard_s", 3.0),
         reject_bystanders=tb_cfg.get("turn_gate", {}).get("reject_bystanders", False) is True,

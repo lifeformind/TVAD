@@ -240,6 +240,14 @@ kiosk:
       verify_window_ms: 700        # 1200 rejected most real barge-ins as too_short; proximity guards bystanders
       duck_level: 0.35             # TTS gain while capturing an interruption; partial (not near-silent) so a rejected interjection doesn't lose the reply's tail. Watch: louder duck = more self-voice in the mic for AEC to cancel
       duck_ramp_ms: 120
+      # Onset floor while the kiosk SPEAKS: residual TTS echo survives the
+      # array's hardware AEC attenuated-but-speech-shaped and cleared the
+      # capped 0.05 proximity floor constantly (live 2026-09-02: duck/restore
+      # storms = audible gain pumping through the story, zero onsets once the
+      # kiosk went quiet). Real owner barge-ins measured 0.5+ rms that session,
+      # so 0.15 has wide headroom both ways. Duck gate = max(proximity, this);
+      # 0.0 disables (proximity floor alone, pre-change behavior).
+      onset_floor_speaking: 0.15
       proximity:
         enabled: true              # ignore speech too quiet to be someone at the kiosk
         rms_threshold: null        # null = auto-calibrate from the primary enrollment RMS
