@@ -41,6 +41,7 @@ def reduce(state: State, ctx: Context, event) -> tuple:
         if state in (State.THINKING, State.SPEAKING) and event.gen_id == ctx.gen_id:
             if event.assistant_text:
                 ctx.conversation.add_assistant_turn(event.assistant_text)
+            ctx.last_reply_done_at = ctx.now   # echo-guard tail anchor
             _enter_listening(ctx)
             return State.LISTENING, []
         if state is State.EVALUATING and event.gen_id == ctx.gen_id:
@@ -52,6 +53,7 @@ def reduce(state: State, ctx: Context, event) -> tuple:
             if event.assistant_text:
                 ctx.conversation.add_assistant_turn(event.assistant_text)
             ctx.reply_done = True
+            ctx.last_reply_done_at = ctx.now   # echo-guard tail anchor
             return State.EVALUATING, []
         return state, []
     if isinstance(event, E.NearFieldOnset) and state is State.SPEAKING:
@@ -131,6 +133,7 @@ class TurnVerdict(enum.Enum):
     REJECT_NOT_TARGET = "not_target"        # pVAD bystander
     REJECT_TOO_QUIET = "too_quiet"          # below proximity floor (distant bystander)
     REJECT_OWNER_ABSENT = "owner_absent_frame"  # owner not in camera frame
+    REJECT_ECHO = "echo_firmware_silent"        # own-TTS echo: DOA tuple present but empty
     REJECT_SPEAKER_UNVERIFIED = "speaker_unverified"  # safety-net streak active
     REJECT_OUT_OF_CONE = "out_of_cone"      # DOA outside the owner cone (Director-11)
 
@@ -188,6 +191,12 @@ def classify_new_turn(ctx: Context, ev: E.SegmentEndpointed) -> TurnVerdict:
     # until one passing window (the owner speaking) resets it.
     if ctx.cfg.lockout_enabled and ctx.miss_streak >= 2:
         return TurnVerdict.REJECT_SPEAKER_UNVERIFIED
+    # Firmware-silence echo guard (see DirectorConfig.echo_guard_tail_s): only
+    # inside the post-reply tail, only when the tracker EXISTS and saw nothing.
+    if (ctx.cfg.echo_guard_tail_s > 0.0
+            and ev.doa_angles is not None and len(ev.doa_angles) == 0
+            and ctx.now - ctx.last_reply_done_at <= ctx.cfg.echo_guard_tail_s):
+        return TurnVerdict.REJECT_ECHO
     if not ctx.cfg.reject_bystanders:
         return TurnVerdict.ACCEPT if complete else TurnVerdict.ACCUMULATE
     if ev.rms < ctx.proximity_rms:
@@ -205,7 +214,7 @@ def gate_diag_reason(ctx: Context, ev: E.SegmentEndpointed):
     v = classify_new_turn(ctx, ev)
     if v in (TurnVerdict.REJECT_NOT_TARGET, TurnVerdict.REJECT_TOO_QUIET,
              TurnVerdict.REJECT_OWNER_ABSENT, TurnVerdict.REJECT_SPEAKER_UNVERIFIED,
-             TurnVerdict.REJECT_OUT_OF_CONE):
+             TurnVerdict.REJECT_OUT_OF_CONE, TurnVerdict.REJECT_ECHO):
         return v.value
     return None
 
@@ -296,6 +305,9 @@ def interjection_reject_reason(ctx: Context, ev: E.InterjectionSegment):
     """The interjection reject ladder (spec s6), as a pure reason. None = accept.
     Single source of truth: _on_interjection_segment decides with it, and the
     runtime's DIAG line prints it — decision and diagnosis can't drift."""
+    if (ctx.cfg.echo_guard_tail_s > 0.0
+            and ev.doa_angles is not None and len(ev.doa_angles) == 0):
+        return "firmware_silent"                          # own-TTS echo (guard doc: config.py)
     if ev.rms < ctx.proximity_rms:                       # proximity pre-gate
         return "too_quiet"
     if cone_vote(ctx, ev.doa_angles) is False:           # wrong direction (Director-11)

@@ -20,6 +20,7 @@ class Context:
     nudged_cycle: bool = False      # already nudged this LISTENING cycle?
     ducked: bool = False            # is TTS currently ducked?
     reply_done: bool = False        # did the reply FINISH while we were EVALUATING a duck?
+    last_reply_done_at: float = -1e9  # ReplyComplete stamp; echo-guard tail anchor
     current_query: str = ""         # the request being answered (for resume)
     partial_response: str = ""      # assistant text spoken so far this turn
     pending_steer: Optional[str] = None  # one-shot LLM steer (resume), Plan 06 fills it

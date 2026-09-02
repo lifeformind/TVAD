@@ -19,10 +19,13 @@ from modes.director.vision.monitor import PresenceMonitor
 
 class VisionWorker:
     def __init__(self, backend, bus, *, fps, present_after_s, absent_after_s,
-                 enroll_frames, clock=time.monotonic, preview_sink=None):
+                 enroll_frames, clock=time.monotonic, preview_sink=None,
+                 open_attempts=5, open_retry_delay_s=0.6):
         self._backend = backend
         self._bus = bus
         self._preview_sink = preview_sink   # callable(frame, detail) | None
+        self._open_attempts = open_attempts
+        self._open_retry_delay_s = open_retry_delay_s
         self._period = 1.0 / fps if fps > 0 else 0.0
         self._present_after_s = present_after_s
         self._absent_after_s = absent_after_s
@@ -46,6 +49,9 @@ class VisionWorker:
                 # Can't see the owner -> UNAVAILABLE (never ABSENT off a bad enroll).
                 if not self._unavailable_emitted:
                     self._unavailable_emitted = True
+                    print("[vision] UNAVAILABLE for this session: owner face "
+                          "enrollment failed (no face found) — walk-away "
+                          "protection is OFF", file=sys.stderr, flush=True)
                     return OwnerPresenceEvent(PresenceStatus.UNAVAILABLE, now)
                 return None
             self._monitor = PresenceMonitor(
@@ -76,9 +82,23 @@ class VisionWorker:
         except Exception:                        # noqa: BLE001 — loop closing
             pass
 
+    def _open_with_retry(self) -> bool:
+        """V4L2 often refuses a re-open for a moment after the previous session
+        released the device (live: one failed open() = UNAVAILABLE for the whole
+        session, silently). Retry briefly; be LOUD on final failure."""
+        for attempt in range(1, self._open_attempts + 1):
+            if self._backend.open():
+                return True
+            if attempt < self._open_attempts and self._open_retry_delay_s > 0:
+                time.sleep(self._open_retry_delay_s)
+        print(f"[vision] UNAVAILABLE for this session: camera open failed "
+              f"after {self._open_attempts} attempts — walk-away protection "
+              "is OFF", file=sys.stderr, flush=True)
+        return False
+
     def _loop_body(self) -> None:
         try:
-            if not self._backend.open():
+            if not self._open_with_retry():
                 self._emit(OwnerPresenceEvent(PresenceStatus.UNAVAILABLE, self._clock()))
                 return
             while self._running:

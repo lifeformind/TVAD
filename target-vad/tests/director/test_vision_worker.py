@@ -52,3 +52,47 @@ def test_failed_enroll_reports_unavailable_not_absent():
     assert isinstance(ev, OwnerPresenceEvent) and ev.status is PS.UNAVAILABLE
     # stays unavailable; never emits ABSENT off a failed enroll
     assert w._run_once(0.1) is None
+
+
+class FlakyOpenBackend(FakeBackend):
+    """open() fails n times then succeeds — the V4L2 re-open race."""
+    def __init__(self, fail_opens, **kw):
+        super().__init__(**kw)
+        self._fail_opens = fail_opens
+        self.open_calls = 0
+
+    def open(self):
+        self.open_calls += 1
+        if self.open_calls <= self._fail_opens:
+            return False
+        return super().open()
+
+
+def test_open_retries_through_transient_failure():
+    be = FlakyOpenBackend(fail_opens=2, grabs=[], embeds=[], classifies=[])
+    w = VisionWorker(be, bus=None, fps=10.0, present_after_s=1.0,
+                     absent_after_s=2.0, enroll_frames=1,
+                     open_attempts=5, open_retry_delay_s=0.0)
+    assert w._open_with_retry() is True
+    assert be.open_calls == 3
+
+
+def test_open_gives_up_after_attempts_and_is_loud(capsys):
+    be = FlakyOpenBackend(fail_opens=99, grabs=[], embeds=[], classifies=[])
+    w = VisionWorker(be, bus=None, fps=10.0, present_after_s=1.0,
+                     absent_after_s=2.0, enroll_frames=1,
+                     open_attempts=3, open_retry_delay_s=0.0)
+    assert w._open_with_retry() is False
+    assert be.open_calls == 3
+    err = capsys.readouterr().err
+    assert "UNAVAILABLE for this session" in err and "open failed" in err
+
+
+def test_enroll_failure_is_loud(capsys):
+    be = FakeBackend(grabs=["f"] * 10, embeds=[None] * 10, classifies=[])
+    w = VisionWorker(be, bus=None, fps=10.0, present_after_s=1.0,
+                     absent_after_s=2.0, enroll_frames=2)
+    ev = w._run_once(0.0)
+    assert ev is not None and ev.status.name == "UNAVAILABLE"
+    err = capsys.readouterr().err
+    assert "UNAVAILABLE for this session" in err and "enroll" in err

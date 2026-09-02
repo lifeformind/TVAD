@@ -153,6 +153,12 @@ KNOBS: tuple[Knob, ...] = (
          "Partial (not near-silent) so a rejected interjection doesn't lose the "
          "reply's tail; louder duck = more self-voice for the AEC to cancel.",
          min=0.0, max=1.0, step=0.05),
+    Knob(TB + "barge_in.echo_guard_tail_s", BARGE, "Echo guard tail (s)", "float",
+         "Reject firmware-silent segments (own-TTS echo) as interjections and, "
+         "within this window after a reply, as new turns; 0 disables.",
+         "The array's SPEECHDETECTED never fires for its own aux playback "
+         "(LED-confirmed 2026-09-02); a trailing echo self-triggered a reply.",
+         min=0.0, max=10.0, step=0.5),
     Knob(TB + "barge_in.onset_floor_speaking", BARGE, "Onset floor while speaking (RMS)", "float",
          "Extra RMS floor for duck-at-onset while TTS plays; 0 disables.",
          "Residual TTS echo ducked replies constantly (2026-09-02); owner barge-ins run 0.5+.",

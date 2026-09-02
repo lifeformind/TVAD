@@ -248,6 +248,15 @@ kiosk:
       # so 0.15 has wide headroom both ways. Duck gate = max(proximity, this);
       # 0.0 disables (proximity floor alone, pre-change behavior).
       onset_floor_speaking: 0.15
+      # Firmware-silence echo guard: the XVF-3000 excludes its own playback
+      # from SPEECHDETECTED (its LED reacts to people, never to the aux
+      # speaker — live-confirmed 2026-09-02), so a segment whose DOA sample
+      # tuple exists but is EMPTY was heard only by the software VAD = the
+      # kiosk's own echo. Rejects such interjections outright, and such NEW
+      # turns within this many seconds of ReplyComplete (a trailing-echo
+      # turn self-triggered a generation with nobody in the room). 0 = off;
+      # no DOA tracker abstains entirely.
+      echo_guard_tail_s: 2.0
       proximity:
         enabled: true              # ignore speech too quiet to be someone at the kiosk
         rms_threshold: null        # null = auto-calibrate from the primary enrollment RMS

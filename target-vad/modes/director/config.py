@@ -24,6 +24,15 @@ class DirectorConfig:
     # The duck gate uses max(proximity_rms, this). 0.0 = proximity floor alone
     # (pre-change behavior).
     onset_floor_speaking: float = 0.0
+    # Firmware-silence echo guard (barge_in.echo_guard_tail_s): the XVF-3000
+    # excludes its own playback from SPEECHDETECTED (LED never reacts to the
+    # aux speaker; live-confirmed 2026-09-02), so a segment whose DOA sample
+    # tuple is PRESENT BUT EMPTY was heard only by the software VAD = the
+    # kiosk's own echo. Interjections (always overlap TTS) are rejected on it
+    # outright; new turns only within this many seconds of ReplyComplete
+    # (the trailing-echo window that self-triggered a generation). 0.0
+    # disables both (pre-change behavior); no DOA tracker always abstains.
+    echo_guard_tail_s: float = 0.0
     # Camera floor control (Director-07, spec §8). Presence is an ADD-ON: these
     # never touch the silence timeout above; they only add an owner-absent end.
     owner_absent_grace_s: float = 3.0   # sustained ABSENT this long => free the kiosk

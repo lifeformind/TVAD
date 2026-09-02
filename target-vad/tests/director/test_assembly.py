@@ -364,3 +364,17 @@ def test_shipped_config_yaml_matches_live_readers():
     assert tb["vision"]["preview"]["path"] == "/dev/shm/tvad-vision-preview.jpg"
     assert "resume" not in tb
     assert "include_partial_transcripts" not in tb["logging"]
+
+
+def test_echo_guard_tail_is_mapped():
+    from modes.director.assembly import _director_config_from
+    cfg = _director_config_from({"barge_in": {"echo_guard_tail_s": 1.5}})
+    assert cfg.echo_guard_tail_s == 1.5
+    assert _director_config_from({}).echo_guard_tail_s == 0.0
+
+
+def test_shipped_echo_guard_value():
+    import yaml
+    with open("config.yaml") as f:
+        tb = yaml.safe_load(f)["kiosk"]["talkback"]
+    assert tb["barge_in"]["echo_guard_tail_s"] == 2.0
