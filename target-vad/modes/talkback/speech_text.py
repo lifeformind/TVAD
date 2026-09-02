@@ -24,7 +24,7 @@ _MD_ITALIC = re.compile(r"\*([^*]+)\*")               # *italic* -> italic
 _MD_ITALIC_U = re.compile(r"_([^_]+)_")               # _italic_ -> italic
 _MD_HEADER = re.compile(r"(?m)^\s{0,3}#{1,6}\s*")     # leading ATX header marker
 _MD_BULLET = re.compile(r"(?m)^\s{0,3}[-*+]\s+")      # leading list bullet
-_MD_STRAY = re.compile(r"[*`_~#]")                    # leftover markup chars
+_MD_STRAY = re.compile(r"[*`_~#＊｀＿～＃]")            # leftover markup chars (ASCII + fullwidth homoglyphs)
 _WS = re.compile(r"\s{2,}")
 
 

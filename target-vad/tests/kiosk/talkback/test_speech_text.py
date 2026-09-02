@@ -59,5 +59,14 @@ def test_preserves_apostrophes_and_hyphens_and_endash():
         "it's well-known – really") == "it's well-known – really"
 
 
+def test_strips_fullwidth_homoglyph_markers():
+    # A decoder routing around an ASCII-only markdown ban can emit fullwidth
+    # lookalikes (U+FF0A/FF03/FF40/FF3F/FF5E) instead — these must never
+    # reach TTS either.
+    result = strip_markdown_for_speech("＃heading ＊bold＊")
+    for ch in "＊＃｀＿～":
+        assert ch not in result
+
+
 def test_collapses_whitespace_left_by_removals():
     assert strip_markdown_for_speech("a  *b*   c") == "a b c"
