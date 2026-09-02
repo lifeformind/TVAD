@@ -151,6 +151,10 @@ class TuningServer:
                     def _start():
                         # The kiosk's VisionWorker needs the camera; release
                         # our direct grabber BEFORE the child process spawns.
+                        # (A concurrent frame poll between release and Popen
+                        # can re-open the grabber; vision_frame() self-heals
+                        # by releasing on the next running-state poll, before
+                        # any session opens the camera.)
                         server_ref.release_grabber()
                         server_ref.kproc.start(
                             diag=bool((body or {}).get("diag", True)))
@@ -158,7 +162,12 @@ class TuningServer:
                 if self.path == "/api/kiosk/stop":
                     return self._kiosk(server_ref.kproc.stop)
                 if self.path == "/api/kiosk/restart":
-                    return self._kiosk(server_ref.kproc.restart)
+                    def _restart():
+                        # Same V4L2-exclusivity rule as start: the child's
+                        # VisionWorker must find the camera free.
+                        server_ref.release_grabber()
+                        server_ref.kproc.restart()
+                    return self._kiosk(_restart)
                 self._json(404, {"error": f"no route: {self.path}"})
 
             def _kiosk(self, action):
@@ -257,6 +266,11 @@ class TuningServer:
         """(200, jpeg bytes) or (503, error dict). Kiosk running: relay the
         vision loop's atomic preview file if fresh. Stopped: direct grabber."""
         if self.kproc.status().get("running"):
+            # Self-heal any grabber leaked past the start/poll race (or a
+            # --start-kiosk boot): the kiosk only opens the camera at SESSION
+            # start (per-handoff VisionWorker), so releasing on the next
+            # running-state poll — the panel polls at 1s — beats it there.
+            self.release_grabber()
             path = self._preview_path()
             try:
                 if time.time() - os.stat(path).st_mtime <= self._PREVIEW_FRESH_S:

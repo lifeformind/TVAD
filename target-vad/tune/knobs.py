@@ -2,7 +2,7 @@
 
 Data, not behavior: the server serializes it for the page and validates saves
 against it; config_edit consumes only `path`. Excluded on purpose (spec 4b):
-sample rates (coupled), device pins, backend selectors, dormant paths
+sample rates (coupled), device pins, backend selectors, vision.preview.* (debug plumbing, not a UX knob), dormant paths
 (aec, crowd_focus), paths/logging."""
 
 from __future__ import annotations

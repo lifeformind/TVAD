@@ -135,3 +135,27 @@ def test_kiosk_start_releases_direct_grabber(srv):
     # Starting the kiosk MUST release it before the child can want the device.
     assert _post(server, "/api/kiosk/start")[0] == 200
     assert grabber.closed is True
+
+
+def test_kiosk_restart_releases_direct_grabber(srv):
+    server, preview, grabber, kproc = srv
+    assert _get_raw(server, "/api/vision/frame")[0] == 200   # server holds camera
+    assert grabber.closed is False
+    # Restart is the tune-a-vision-knob-then-apply workflow: it MUST release
+    # the grabber before the kiosk child spawns, same as start.
+    assert _post(server, "/api/kiosk/restart")[0] == 200
+    assert grabber.closed is True
+
+
+def test_running_poll_self_heals_a_leaked_grabber(srv):
+    server, preview, grabber, kproc = srv
+    # Simulate the start/poll race: grabber acquired, then kiosk begins running
+    # WITHOUT the start route (e.g. --start-kiosk, or the TOCTOU window).
+    assert _get_raw(server, "/api/vision/frame")[0] == 200
+    assert grabber.closed is False
+    kproc.start(diag=False)
+    preview.write_bytes(JPEG)
+    # First frame poll while running must release the held grabber — the kiosk
+    # only opens the camera at SESSION start, so this closes the race for real.
+    assert _get_raw(server, "/api/vision/frame")[0] == 200
+    assert grabber.closed is True

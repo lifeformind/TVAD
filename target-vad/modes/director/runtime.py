@@ -95,7 +95,11 @@ class DirectorRuntime:
                               f"prox={self._director.ctx.proximity_rms:.4f} "
                               f"presence={self._director.ctx.presence_status.name} "
                               f"{cone_diag(self._director.ctx, event.doa_angles)}")
-                if _DIAG and isinstance(event, E.InterjectionSegment):
+                if (_DIAG and isinstance(event, E.InterjectionSegment)
+                        and any(isinstance(c, C.Restore) for c in commands)):
+                    # Only when a Restore actually happened — an
+                    # InterjectionSegment dispatched outside EVALUATING is a
+                    # no-op and must not log a REJECT that never occurred.
                     line = interjection_diag_line(self._director.ctx, event)
                     if line is not None:
                         _diag(line)
