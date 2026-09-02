@@ -41,7 +41,7 @@ class SafetyNetWorker:
         for v in verdicts:
             await self._bus.emit(E.SpeakerWindowVerdict(
                 score=v.score, smoother_ok=v.smoother_ok,
-                window_rms=v.window_rms))
+                window_rms=v.window_rms, norm_score=v.norm_score))
 
     def _drain(self, audio):
         """Accumulate, then consume EVERY full window (a long turn can complete

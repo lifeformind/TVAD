@@ -98,3 +98,4 @@ class SpeakerWindowVerdict:
     score: float                     # cosine(window embedding, primary)
     smoother_ok: bool                # M-of-N smoother output for this window
     window_rms: float                # RMS over the window audio (eject rms check)
+    norm_score: "float | None" = None  # AS-Norm score (Task 7); None = normalizer off

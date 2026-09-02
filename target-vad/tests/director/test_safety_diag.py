@@ -47,6 +47,17 @@ def test_shadow_window_one_fail_shows_would_end():
     assert "WARN (shadow) would_end=enroll_verify_failed" in line
 
 
+def test_norm_score_appended_when_present():
+    line = _run(_ctx(), E.SpeakerWindowVerdict(0.85, True, 0.4, norm_score=2.5))
+    assert line == ("safety-net window=1 score=0.850 smoother_ok=True "
+                    "streak=0 rms=0.4000 norm=2.50")
+
+
+def test_norm_score_absent_when_none():
+    line = _run(_ctx(), E.SpeakerWindowVerdict(0.85, True, 0.4))
+    assert "norm=" not in line
+
+
 def test_shadow_eject_condition_shows_would_end():
     ctx = _ctx(lockout=False)
     _run(ctx, E.SpeakerWindowVerdict(0.9, True, 0.4))     # window 1 passes

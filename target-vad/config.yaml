@@ -155,6 +155,18 @@ kiosk:
                                    # false ejects. 0.15 = midpoint of the live gap.
       verify_window_ms: 2000       # accumulate served turn audio to this, then verify
       endpoint_threshold: 0.5      # Smart Turn endpoint_prob >= this => turn complete
+      # AS-Norm score calibration (spec Appendix C): normalize every ECAPA
+      # score against an imposter cohort recorded through OUR channel
+      # (bench/build_cohort.py). mode: off = raw scores (today) | shadow =
+      # normalized score computed + logged, raw still decides | on =
+      # normalized score decides, using the *_norm thresholds. Ship shadow
+      # first; flip to on only after a bench/speaker_scores.py sweep of
+      # live shadow logs picks the norm thresholds.
+      score_norm:
+        mode: "shadow"
+        cohort_path: "./voiceprints/cohort.npy"
+        top_k: 50
+        speaker_threshold_norm: 0.0    # z-like scale; tune from shadow logs
       # Bystander gate v1 (Director-08): reject NON-owner NEW turns by proximity +
       # camera presence (reject-by-default, "never answer a stranger"). Fail-safe:
       # rejects only when too quiet/distant OR owner ABSENT from frame; PRESENT and
@@ -203,6 +215,7 @@ kiosk:
       enabled: true
       min_speech_ms: 120
       speaker_threshold: 0.20      # provisional; live barge-ins (AEC on) scored ~0.12-0.41
+      speaker_threshold_norm: 0.0  # used only when turn_gate.score_norm.mode is "on"
       conf_floor: 0.5              # interjection mean_word_prob below this => RESTORE
       verify_window_ms: 700        # 1200 rejected most real barge-ins as too_short; proximity guards bystanders
       duck_level: 0.35             # TTS gain while capturing an interruption; partial (not near-silent) so a rejected interjection doesn't lose the reply's tail. Watch: louder duck = more self-voice in the mic for AEC to cancel

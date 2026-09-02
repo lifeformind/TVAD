@@ -215,6 +215,8 @@ def safety_diag_line(ctx: Context, ev, commands) -> str:
     line = (f"safety-net window={ctx.windows_seen} score={ev.score:.3f} "
             f"smoother_ok={ev.smoother_ok} streak={ctx.miss_streak} "
             f"rms={ev.window_rms:.4f}")
+    if ev.norm_score is not None:
+        line = f"{line} norm={ev.norm_score:.2f}"
     ends = [c for c in commands if isinstance(c, C.EndSession)]
     if ends:
         return f"{line} EJECT reason={ends[0].reason}"

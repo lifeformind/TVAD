@@ -201,6 +201,94 @@ def test_safety_net_none_without_embedder_or_primary():
     assert _build_safety_net(cfg, np.ones(4), None, EventBus()) is None
 
 
+def _write_cohort(tmp_path, n=4, d=192):
+    """A tiny unit-norm imposter cohort .npy for the score_norm mapping tests."""
+    rng = np.random.RandomState(0)
+    cohort = rng.randn(n, d).astype(np.float32)
+    cohort /= np.linalg.norm(cohort, axis=1, keepdims=True)
+    path = tmp_path / "cohort.npy"
+    np.save(path, cohort)
+    return str(path)
+
+
+def test_score_norm_shadow_mode_sets_normalizer_raw_still_decides(tmp_path):
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    cohort_path = _write_cohort(tmp_path)
+    emb = object()
+    prim = np.ones(192, dtype=np.float32)
+    bus = EventBus()
+    cfg = {"turn_gate": {"require_speaker_match": True,
+                         "score_norm": {"mode": "shadow", "cohort_path": cohort_path}}}
+    worker = _build_safety_net(cfg, prim, emb, bus)
+    assert worker is not None
+    net = worker._net
+    assert net._normalizer is not None
+    assert net._norm_decides is False
+
+
+def test_score_norm_on_mode_norm_decides_and_uses_norm_threshold(tmp_path):
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    cohort_path = _write_cohort(tmp_path)
+    emb = object()
+    prim = np.ones(192, dtype=np.float32)
+    bus = EventBus()
+    cfg = {"turn_gate": {"require_speaker_match": True,
+                         "score_norm": {"mode": "on", "cohort_path": cohort_path,
+                                        "speaker_threshold_norm": 1.23}}}
+    worker = _build_safety_net(cfg, prim, emb, bus)
+    net = worker._net
+    assert net._normalizer is not None
+    assert net._norm_decides is True
+    assert net._smoother.threshold == pytest.approx(1.23)
+
+
+def test_score_norm_off_mode_no_normalizer(tmp_path):
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    cohort_path = _write_cohort(tmp_path)
+    emb = object()
+    prim = np.ones(192, dtype=np.float32)
+    bus = EventBus()
+    cfg = {"turn_gate": {"require_speaker_match": True,
+                         "score_norm": {"mode": "off", "cohort_path": cohort_path}}}
+    worker = _build_safety_net(cfg, prim, emb, bus)
+    assert worker._net._normalizer is None
+
+
+def test_score_norm_missing_cohort_fails_open_and_warns(tmp_path, capsys):
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    emb = object()
+    prim = np.ones(192, dtype=np.float32)
+    bus = EventBus()
+    cfg = {"turn_gate": {"require_speaker_match": True,
+                         "score_norm": {"mode": "on",
+                                        "cohort_path": str(tmp_path / "nope.npy")}}}
+    worker = _build_safety_net(cfg, prim, emb, bus)
+    assert worker._net._normalizer is None
+    assert worker._net._norm_decides is False
+    err = capsys.readouterr().err
+    assert "score_norm" in err and "falling back to raw scores" in err
+
+
+def test_score_norm_empty_cohort_fails_open_and_warns(tmp_path, capsys):
+    from modes.director.assembly import _build_safety_net
+    from modes.director.bus import EventBus
+    empty_path = tmp_path / "empty.npy"
+    np.save(empty_path, np.zeros((0, 192), dtype=np.float32))
+    emb = object()
+    prim = np.ones(192, dtype=np.float32)
+    bus = EventBus()
+    cfg = {"turn_gate": {"require_speaker_match": True,
+                         "score_norm": {"mode": "on", "cohort_path": str(empty_path)}}}
+    worker = _build_safety_net(cfg, prim, emb, bus)
+    assert worker._net._normalizer is None
+    err = capsys.readouterr().err
+    assert "score_norm" in err and "falling back to raw scores" in err
+
+
 def test_lockout_enabled_strict_bool_mapping():
     from modes.director.assembly import _director_config_from
     assert _director_config_from(
@@ -232,6 +320,10 @@ def test_shipped_config_yaml_matches_live_readers():
     assert tb["nudge_lead_s"] == 5.0
     assert tb["barge_in"]["conf_floor"] == 0.5
     assert tb["watchdog"]["tick_ms"] == 500
+    assert tb["turn_gate"]["score_norm"]["mode"] == "shadow"
+    assert tb["turn_gate"]["score_norm"]["cohort_path"] == "./voiceprints/cohort.npy"
+    assert tb["turn_gate"]["score_norm"]["top_k"] == 50
+    assert tb["barge_in"]["speaker_threshold_norm"] == 0.0
     # dead keys must be GONE
     assert "decision_smoother" not in full["kiosk"]
     assert "suppression_level" not in tb["aec"]

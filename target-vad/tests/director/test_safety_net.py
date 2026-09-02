@@ -65,3 +65,46 @@ def test_verdict_carries_window_rms():
     v = net.maybe_verify()
     assert v is not None
     assert abs(v.window_rms - 0.5) < 1e-6
+
+
+class _Emb:
+    """Fake embedder: extract -> unit ones (Task 7 AS-Norm wiring tests)."""
+    def extract(self, audio, sample_rate=16000):
+        return np.ones(4, dtype=np.float32)
+
+
+class _FixedNorm:
+    def score(self, enroll, test):
+        return 7.0
+
+
+def test_shadow_mode_logs_norm_but_raw_decides():
+    emb = _Emb()          # existing fake: extract -> unit ones
+    primary = emb.extract(np.zeros(4))
+    net = SafetyNet(emb, primary, verify_window_ms=100, threshold=0.5,
+                    normalizer=_FixedNorm(), norm_decides=False, sr=16000)
+    net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
+    v = net.maybe_verify()
+    assert v.norm_score == 7.0
+    assert v.score == pytest.approx(1.0)      # raw cosine, and it decided
+    assert v.smoother_ok is True
+
+
+def test_on_mode_normalized_score_feeds_smoother():
+    emb = _Emb()
+    primary = emb.extract(np.zeros(4))
+    class _LowNorm:
+        def score(self, enroll, test): return -3.0
+    net = SafetyNet(emb, primary, verify_window_ms=100, threshold=0.0,
+                    normalizer=_LowNorm(), norm_decides=True, sr=16000)
+    net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
+    v = net.maybe_verify()
+    assert v.smoother_ok is False             # -3.0 < threshold 0.0 despite raw cosine 1.0
+
+
+def test_no_normalizer_is_todays_behavior():
+    emb = _Emb()
+    net = SafetyNet(emb, emb.extract(np.zeros(4)), verify_window_ms=100, threshold=0.5)
+    net.accumulate(np.ones(1600, dtype=np.float32), is_target=True)
+    v = net.maybe_verify()
+    assert v.norm_score is None and v.smoother_ok is True

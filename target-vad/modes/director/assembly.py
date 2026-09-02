@@ -26,6 +26,7 @@ import numpy as np
 
 _DIAG = bool(os.environ.get("TVAD_DIAG"))
 
+from core.speaker.calibration import AsNorm
 from core.speaker.verifier import cosine_similarity
 from modes.director.bus import EventBus
 from modes.director.config import DirectorConfig
@@ -121,6 +122,30 @@ def _build_vision(tb_cfg: dict, *, bus):
         enroll_frames=v.get("enroll_frames", 8))
 
 
+def _load_score_normalizer(tg: dict):
+    """Load the AS-Norm cohort per turn_gate.score_norm (Task 7). Returns
+    (normalizer_or_None, effective_mode). effective_mode falls back to "off"
+    on any load failure OR an empty cohort (AsNorm on an empty cohort divides
+    by a zero-length top-k slice -> NaN, so treat it exactly like a load
+    failure) — warns to stderr so a misconfigured cohort_path/empty cohort is
+    visible, never silent. mode "off" (or unset) never touches the filesystem."""
+    sn_cfg = tg.get("score_norm", {})
+    mode = sn_cfg.get("mode", "off")
+    if mode not in ("shadow", "on"):
+        return None, "off"
+    path = sn_cfg.get("cohort_path", "./voiceprints/cohort.npy")
+    try:
+        cohort = np.load(path)
+        if len(cohort) == 0:
+            raise ValueError(f"cohort at {path!r} is empty")
+        normalizer = AsNorm(cohort, top_k=sn_cfg.get("top_k", 50))
+    except (OSError, ValueError) as exc:
+        print(f"[assembly] score_norm: cohort load failed ({exc}) — "
+              "falling back to raw scores", file=sys.stderr, flush=True)
+        return None, "off"
+    return normalizer, mode
+
+
 def _build_safety_net(tb_cfg: dict, primary_embedding, embedder, bus):
     """Build the Director-09 accumulated-window ECAPA safety net, or None (no
     hijack detection — byte-for-byte Director-08 behavior). Strict-bool enable:
@@ -136,24 +161,42 @@ def _build_safety_net(tb_cfg: dict, primary_embedding, embedder, bus):
     if embedder is None or primary_embedding is None:
         return None
     lock = tg.get("lockout", {})
+    normalizer, norm_mode = _load_score_normalizer(tg)
+    threshold = (tg.get("score_norm", {}).get("speaker_threshold_norm", 0.0)
+                 if norm_mode == "on" else tg.get("speaker_threshold", 0.30))
     net = SafetyNet(
         embedder, primary_embedding,
         verify_window_ms=tg.get("verify_window_ms", 2000),
-        threshold=tg.get("speaker_threshold", 0.30),
+        threshold=threshold,
         window_size=lock.get("window_size", 3),
         min_matches=lock.get("min_matches", 1),
         sr=tb_cfg.get("sample_rate_hz", 16000),
+        normalizer=normalizer,
+        norm_decides=(norm_mode == "on"),
     )
     print("[director] safety net ENABLED (accumulated-window ECAPA)",
           file=sys.stderr, flush=True)
+    if norm_mode != "off":
+        print(f"[director] safety net: AS-Norm cohort loaded, mode={norm_mode}",
+              file=sys.stderr, flush=True)
     return SafetyNetWorker(net, bus)
 
 
-def _director_config_from(tb_cfg: dict) -> DirectorConfig:
+def _director_config_from(tb_cfg: dict, score_norm_mode: Optional[str] = None) -> DirectorConfig:
     """Map the kiosk.talkback.* config onto the frozen DirectorConfig. Pulls the
-    same keys the reducer's thresholds came from (spec section 5/6)."""
+    same keys the reducer's thresholds came from (spec section 5/6).
+
+    score_norm_mode: the EFFECTIVE turn_gate.score_norm mode (post cohort-load
+    fallback), passed by build_director_runtime so the barge-in threshold never
+    disagrees with the score_fn actually wired into IngestionWorker. None (the
+    default, and every existing caller/test) falls back to the CONFIGURED mode
+    string in tb_cfg — fine for callers that never touch score_norm."""
     barge = tb_cfg.get("barge_in", {})
     vision = tb_cfg.get("vision", {})
+    if score_norm_mode is None:
+        score_norm_mode = tb_cfg.get("turn_gate", {}).get("score_norm", {}).get("mode", "off")
+    speaker_threshold = (barge.get("speaker_threshold_norm", 0.0) if score_norm_mode == "on"
+                         else barge.get("speaker_threshold", 0.20))
     return DirectorConfig(
         silence_timeout_s=tb_cfg.get("silence_timeout_s", 30.0),
         hard_timeout_s=tb_cfg.get("hard_timeout_s", 300.0),
@@ -161,7 +204,7 @@ def _director_config_from(tb_cfg: dict) -> DirectorConfig:
         endpoint_threshold=tb_cfg.get("turn_gate", {}).get("endpoint_threshold", 0.5),
         min_speech_ms=barge.get("min_speech_ms", 120.0),
         verify_window_ms=barge.get("verify_window_ms", 700.0),
-        speaker_threshold=barge.get("speaker_threshold", 0.20),
+        speaker_threshold=speaker_threshold,
         conf_floor=barge.get("conf_floor", 0.5),
         duck_level=barge.get("duck_level", 0.35),
         owner_absent_grace_s=vision.get("owner_absent_grace_s", 3.0),
@@ -333,7 +376,13 @@ def build_director_runtime(
                      to abstain from direction-of-arrival gating entirely.
     """
     tb_cfg = handoff.config or {}
-    cfg = _director_config_from(tb_cfg)
+    # AS-Norm (Task 7): load ONCE here so the barge-in score_fn and the
+    # DirectorConfig.speaker_threshold it's compared against always agree,
+    # even when the configured mode is "on" but the cohort fails to load
+    # (effective mode falls back to "off" for BOTH in that case).
+    bargein_normalizer, bargein_norm_mode = _load_score_normalizer(
+        tb_cfg.get("turn_gate", {}))
+    cfg = _director_config_from(tb_cfg, score_norm_mode=bargein_norm_mode)
 
     bus = EventBus()
     conversation = ConversationManager(
@@ -371,12 +420,16 @@ def build_director_runtime(
     pvad = _build_pvad(handoff.primary_embedding, proximity_rms, tb_cfg)
     safety = _build_safety_net(tb_cfg, handoff.primary_embedding,
                                handoff.embedder, bus)
+    # score_fn(embedding, primary) i.e. (test, enroll) — AsNorm.score(enroll,
+    # test) is symmetric in its two args, so the swapped order is harmless.
+    score_fn = (bargein_normalizer.score if bargein_norm_mode == "on"
+                else cosine_similarity)
     ingestion = IngestionWorker(
         mic=handoff.mic, vad=handoff.vad, aec=aec, turn_detector=turn_detector,
         embedder=handoff.embedder, primary_embedding=handoff.primary_embedding,
         stt_worker=stt_worker, playback=playback, bus=bus, cfg=cfg,
         proximity_rms=proximity_rms, state_getter=lambda: director.state,
-        score_fn=cosine_similarity, pvad=pvad, safety_worker=safety,
+        score_fn=score_fn, pvad=pvad, safety_worker=safety,
         doa_tracker=doa_tracker,
     )
 
