@@ -115,8 +115,20 @@ def probe_openai_whisper(model_name, clip):
     }
 
 
-def probe_nemo(model_name, clip):
-    """Probe-only: import nemo if present; do NOT install. Report availability."""
+def probe_nemo(model_name, clip, enable_confidence=False, verbose=False):
+    """Live GO/NO-GO spike (Task 9): loads a Parakeet checkpoint from
+    NGC/HF via from_pretrained (downloads + caches the .nemo on first use,
+    ~2.4GB for the 0.6b models), runs it on CUDA, and measures:
+      * mean transcribe() latency over N_TOTAL-N_WARMUP timed runs
+      * whether per-word confidence is populated on the returned Hypothesis
+        objects (transcribe(..., return_hypotheses=True) is required for
+        Hypothesis objects at all; the plain-string API never carries them)
+
+    If enable_confidence=True, first calls model.change_decoding_strategy()
+    with a decoding config that turns on preserve_word_confidence (TDT/RNNT
+    confidence is OFF by default in NeMo — this is the documented way to
+    turn it on; see docs/notes for the exact invocation this discovered).
+    """
     try:
         import nemo  # noqa: F401
         import nemo.collections.asr as nemo_asr
@@ -124,42 +136,133 @@ def probe_nemo(model_name, clip):
         return {"error": f"nemo not installed / import failed: {e}"}
 
     try:
+        import torch
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"torch import failed: {e}"}
+
+    if not torch.cuda.is_available():
+        return {"error": "torch.cuda not available"}
+
+    try:
         model = nemo_asr.models.ASRModel.from_pretrained(model_name)
     except Exception as e:  # noqa: BLE001
         return {"error": f"from_pretrained({model_name}) failed: {e}"}
 
-    # Write the clip to a temp wav (NeMo transcribe takes file paths).
-    import tempfile
+    model = model.to("cuda").eval()
 
-    import soundfile as sf
+    confidence_cfg_applied = None
+    if enable_confidence:
+        try:
+            from omegaconf import open_dict
 
+            from nemo.collections.asr.parts.utils.asr_confidence_utils import (
+                ConfidenceConfig,
+            )
+
+            confidence_cfg = ConfidenceConfig(
+                preserve_word_confidence=True,
+                preserve_token_confidence=True,
+                preserve_frame_confidence=False,
+            )
+            decoding_cfg = model.cfg.decoding
+            # decoding_cfg is a struct DictConfig — confidence_cfg is not an
+            # existing key on the TDT/RNNT decoding schema, so a plain
+            # attribute-set raises "Key 'confidence_cfg' is not in struct".
+            # open_dict() temporarily disables struct-mode to allow adding it.
+            with open_dict(decoding_cfg):
+                decoding_cfg.confidence_cfg = confidence_cfg
+            model.change_decoding_strategy(decoding_cfg)
+            confidence_cfg_applied = (
+                "from omegaconf import open_dict; "
+                "decoding_cfg = model.cfg.decoding; "
+                "with open_dict(decoding_cfg): "
+                "decoding_cfg.confidence_cfg = ConfidenceConfig("
+                "preserve_word_confidence=True, preserve_token_confidence=True, "
+                "preserve_frame_confidence=False); "
+                "model.change_decoding_strategy(decoding_cfg)"
+            )
+        except Exception as e:  # noqa: BLE001
+            confidence_cfg_applied = f"FAILED to enable confidence: {e}"
+
+    # transcribe() takes the raw float32 array directly on recent NeMo
+    # (audio=[np.ndarray, ...]); fall back to a temp wav path for older
+    # versions that only accept file paths.
     times = []
     text = ""
     has_word_conf = False
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tf:
-        sf.write(tf.name, clip, SR)
-        for i in range(N_TOTAL):
-            t0 = time.perf_counter()
-            out = model.transcribe([tf.name])
-            dt = (time.perf_counter() - t0) * 1000.0
-            if i >= N_WARMUP:
-                times.append(dt)
-            # NeMo returns Hypothesis objects (or strings on older versions).
-            hyp = out[0] if out else None
-            if hasattr(hyp, "text"):
-                text = (hyp.text or "").strip()
-                # Per-word confidence lives on hyp.word_confidence when emitted.
-                wc = getattr(hyp, "word_confidence", None)
-                has_word_conf = bool(wc)
-            elif isinstance(hyp, str):
-                text = hyp.strip()
+    conf_attrs = []
+    sample_word_confidences = []
+    device_seen = None
+    hyp = None
+
+    def _run_transcribe():
+        try:
+            return model.transcribe(audio=[clip], return_hypotheses=True, verbose=False)
+        except TypeError:
+            # Older NeMo: no `audio=` kwarg / no `verbose=` kwarg.
+            try:
+                return model.transcribe([clip], return_hypotheses=True)
+            except Exception:
+                import tempfile
+
+                import soundfile as sf
+
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tf:
+                    sf.write(tf.name, clip, SR)
+                    return model.transcribe([tf.name], return_hypotheses=True)
+
+    # Warm-up (excluded from timing; also primes CUDA kernels/cuDNN autotune).
+    try:
+        _run_transcribe()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"transcribe() warm-up failed: {e}"}
+
+    try:
+        for p in model.parameters():
+            device_seen = str(p.device)
+            break
+    except Exception:  # noqa: BLE001
+        pass
+
+    for i in range(N_TOTAL):
+        t0 = time.perf_counter()
+        out = _run_transcribe()
+        dt = (time.perf_counter() - t0) * 1000.0
+        if i >= N_WARMUP:
+            times.append(dt)
+        # NeMo returns Hypothesis objects (or strings on older versions).
+        h = out[0] if out else None
+        # Some NeMo versions nest single-output batches in a list-of-lists.
+        if isinstance(h, list) and h:
+            h = h[0]
+        hyp = h
+        if hasattr(hyp, "text"):
+            text = (hyp.text or "").strip()
+            conf_attrs = [a for a in dir(hyp) if "conf" in a.lower()]
+            wc = getattr(hyp, "word_confidence", None)
+            has_word_conf = bool(wc)
+            if wc:
+                sample_word_confidences = [round(float(x), 3) for x in list(wc)[:8]]
+        elif isinstance(hyp, str):
+            text = hyp.strip()
+
     p50, p95 = p50_p95(times)
+    mean_ms = float(np.mean(times)) if times else float("nan")
+    if verbose:
+        print(f"    [nemo] device={device_seen} confidence_cfg={confidence_cfg_applied}")
+        print(f"    [nemo] hypothesis attrs with 'conf': {conf_attrs}")
+        print(f"    [nemo] sample word_confidence: {sample_word_confidences}")
     return {
         "loaded": True,
         "p50_ms": p50,
         "p95_ms": p95,
+        "mean_ms": mean_ms,
         "text": text[:80],
         "has_word_conf": has_word_conf,
+        "conf_attrs": conf_attrs,
+        "sample_word_confidences": sample_word_confidences,
+        "device": device_seen,
+        "confidence_cfg_applied": confidence_cfg_applied,
     }
 
 
@@ -173,7 +276,47 @@ def fmt_row(name, r):
     )
 
 
+def parse_args():
+    import argparse
+
+    p = argparse.ArgumentParser(
+        description=(
+            "STT backend-selection spike. With no args, runs the full "
+            "openai-whisper + NeMo matrix (original Plan-04 behavior). "
+            "Pass --nemo-model for a fast, single-model Task-9 GO/NO-GO run "
+            "(skips whisper, which is already proven on this box)."
+        )
+    )
+    p.add_argument(
+        "--nemo-model",
+        action="append",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "NeMo/HF pretrained model name to probe (repeatable), e.g. "
+            "nvidia/parakeet-tdt-0.6b-v2. When given, only these NeMo "
+            "models are probed (whisper is skipped) for a fast spike."
+        ),
+    )
+    p.add_argument(
+        "--nemo-confidence",
+        action="store_true",
+        help=(
+            "Enable per-word/token confidence via "
+            "model.change_decoding_strategy(...ConfidenceConfig(...)) "
+            "before timing/transcribing."
+        ),
+    )
+    p.add_argument(
+        "--skip-whisper",
+        action="store_true",
+        help="Skip the openai-whisper rows even in full-matrix mode.",
+    )
+    return p.parse_args()
+
+
 def main():
+    args = parse_args()
     print("=" * 78)
     print("  STT BACKEND-SELECTION SPIKE — GB10 (DGX Spark)  [Director Plan 04]")
     print("=" * 78)
@@ -199,12 +342,24 @@ def main():
         sys.exit(1)
 
     results = {}
-    for name in ("base.en", "tiny"):
-        print(f"  probing openai-whisper {name} ...", flush=True)
-        results[f"openai-whisper/{name}"] = probe_openai_whisper(name, clip)
-    for name in ("nvidia/parakeet-tdnn-0.6b-v2", "nvidia/parakeet-tdt-0.6b-v2"):
-        print(f"  probing NeMo {name} ...", flush=True)
-        results[f"nemo/{name}"] = probe_nemo(name, clip)
+
+    if args.nemo_model:
+        # Fast, targeted Task-9 spike: only the requested NeMo model(s).
+        for name in args.nemo_model:
+            print(f"  probing NeMo {name} (confidence={args.nemo_confidence}) ...", flush=True)
+            results[f"nemo/{name}"] = probe_nemo(
+                name, clip, enable_confidence=args.nemo_confidence, verbose=True
+            )
+    else:
+        if not args.skip_whisper:
+            for name in ("base.en", "tiny"):
+                print(f"  probing openai-whisper {name} ...", flush=True)
+                results[f"openai-whisper/{name}"] = probe_openai_whisper(name, clip)
+        for name in ("nvidia/parakeet-tdt-0.6b-v2",):
+            print(f"  probing NeMo {name} ...", flush=True)
+            results[f"nemo/{name}"] = probe_nemo(
+                name, clip, enable_confidence=args.nemo_confidence, verbose=True
+            )
 
     print()
     print("  RESULTS")
