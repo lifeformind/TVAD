@@ -40,8 +40,15 @@ core:
     silero_model_path: null
 
 kiosk:
-  wake_phrase: "hey_mycroft"
-  wake_threshold: 0.5
+  # Prebuilt openWakeWord name ("hey_mycroft", "hey_jarvis", "alexa") OR a
+  # path to a custom-trained .onnx. "Hey Kusu" (Kusu Island turtle legend,
+  # Singapore) was trained 2026-09-04 on 30k synthetic positives; retrain
+  # variants via bench/train_wakeword.sh (see docs/notes/2026-09-04-hey-kusu-wakeword.md).
+  wake_phrase: "models/wake/hey_kusu.onnx"
+  # Custom models run hotter than the hand-tuned prebuilts: 0.4 validated
+  # offline (0% false accepts on real room audio, ~62% on hard augmented
+  # holdouts; clean close-mic speech scores higher). Sweep live if needed.
+  wake_threshold: 0.4
   awaiting_speech_timeout_s: 15
 
   talkback_enabled: false

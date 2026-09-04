@@ -44,8 +44,10 @@ TABS = (WAKE, GATE, DOA, BARGE, CAM, TIME, VOICE, AUDIO)
 KNOBS: tuple[Knob, ...] = (
     # ---- Wake & Enrollment ----
     Knob("kiosk.wake_phrase", WAKE, "Wake phrase", "select",
-         "openWakeWord phrase the kiosk arms on.",
-         choices=("hey_mycroft", "hey_jarvis", "alexa")),
+         "openWakeWord phrase the kiosk arms on. 'Hey Kusu' is the "
+         "custom-trained Singapore model (models/wake/hey_kusu.onnx).",
+         choices=("models/wake/hey_kusu.onnx", "hey_mycroft", "hey_jarvis",
+                  "alexa")),
     Knob("kiosk.wake_threshold", WAKE, "Wake threshold", "float",
          "Wake detector score required to trigger.",
          min=0.1, max=0.95, step=0.05),
