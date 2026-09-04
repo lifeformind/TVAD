@@ -72,6 +72,32 @@ class TestWakeWordDetector:
         assert result is None
         fake_model.predict.assert_not_called()
 
+    def test_path_model_name_matches_stem_key(self, fake_model):
+        """A custom model given as a file path must match predictions keyed by
+        the file's stem (openwakeword keys custom models that way)."""
+        from modes.kiosk.wake_word import WakeWordDetector
+        with patch("modes.kiosk.wake_word.Model", return_value=fake_model):
+            det = WakeWordDetector(model_name="models/wake/hey_kusu.onnx",
+                                   threshold=0.5)
+        fake_model.predict.return_value = {"hey_kusu": 0.9}
+        chunks_needed = (1280 + 479) // 480
+        result = None
+        for _ in range(chunks_needed):
+            result = det.process(np.zeros(480, dtype=np.float32))
+        assert result == pytest.approx(0.9)
+
+    def test_path_model_name_ignores_other_keys(self, fake_model):
+        from modes.kiosk.wake_word import WakeWordDetector
+        with patch("modes.kiosk.wake_word.Model", return_value=fake_model):
+            det = WakeWordDetector(model_name="models/wake/hey_kusu.onnx",
+                                   threshold=0.5)
+        fake_model.predict.return_value = {"hey_jarvis_v0.1": 0.99, "hey_kusu": 0.2}
+        chunks_needed = (1280 + 479) // 480
+        result = None
+        for _ in range(chunks_needed):
+            result = det.process(np.zeros(480, dtype=np.float32))
+        assert result is None
+
     def test_predict_called_with_int16_audio(self, detector, fake_model):
         """The wrapper converts float32 [-1,1] audio to int16 PCM before passing to predict()."""
         chunks_needed = (1280 + 479) // 480

@@ -1,5 +1,6 @@
 """WakeWordDetector — thin wrapper over openwakeword with a clean Optional[float] API."""
 
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -22,6 +23,10 @@ class WakeWordDetector:
     def __init__(self, model_name: str, threshold: float):
         self.model_name = model_name
         self.threshold = threshold
+        # openwakeword keys a custom model's predictions by its file STEM, so a
+        # path-form model_name would never substring-match the key. Match on
+        # the stem either way (a bare name is its own stem).
+        self._match_key = Path(model_name).stem.lower()
         self._model = Model(wakeword_models=[model_name], inference_framework="onnx")
         self._buffer = np.array([], dtype=np.float32)
 
@@ -39,7 +44,7 @@ class WakeWordDetector:
             frame_i16 = (frame_f32 * 32767.0).clip(-32768, 32767).astype(np.int16)
             preds = self._model.predict(frame_i16)
             for key, score in preds.items():
-                if self.model_name in key.lower():
+                if self._match_key in key.lower():
                     if score >= self.threshold:
                         if best_score is None or score > best_score:
                             best_score = float(score)
