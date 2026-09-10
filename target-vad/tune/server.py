@@ -273,13 +273,20 @@ class TuningServer:
             self.release_grabber()
             path = self._preview_path()
             try:
-                if time.time() - os.stat(path).st_mtime <= self._PREVIEW_FRESH_S:
+                age_s = time.time() - os.stat(path).st_mtime
+                if age_s <= self._PREVIEW_FRESH_S:
                     return 200, Path(path).read_bytes()
-                return 503, {"error": "kiosk preview stale (vision preview off "
-                                      "or vision unavailable?)"}
+                # Expected while the kiosk idles between sessions: only a
+                # session's VisionWorker produces frames, and we must not
+                # open the camera ourselves while the kiosk could start one.
+                return 503, {"error": "kiosk idle — preview is live only "
+                                      "during a session (or with the kiosk "
+                                      f"stopped); last frame {age_s/60:.0f}m "
+                                      "ago"}
             except OSError:
-                return 503, {"error": "kiosk running but no preview file yet "
-                                      "(vision.preview.enabled?)"}
+                return 503, {"error": "kiosk running, no preview yet — "
+                                      "frames appear once a session starts "
+                                      "(if not: check vision.preview.enabled)"}
         with self._grabber_lock:
             if self._grabber is None:
                 factory = self._grabber_factory or self._default_grabber
