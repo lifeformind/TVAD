@@ -331,9 +331,10 @@ def main():
         doa_tracker.start()          # unavailable -> logs once, reads return None
         runtime.set_doa_tracker(doa_tracker)
 
+    from modes.kiosk.wake_word import display_name
     console.print(
         f"[bold][TALKBACK][/] Listening for "
-        f"[bold cyan]\"{config['kiosk']['wake_phrase']}\"[/]..."
+        f"[bold cyan]\"{display_name(config['kiosk']['wake_phrase'])}\"[/]..."
     )
     gate = build_wakegate(config, console, runtime=runtime,
                           doa_tracker=doa_tracker)

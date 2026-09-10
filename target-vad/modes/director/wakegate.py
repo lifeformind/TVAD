@@ -36,7 +36,7 @@ from core.audio.mic_stream import MicrophoneStream
 from core.speaker.embedder import EmbeddingExtractor
 from core.vad.silero_vad import SileroVAD, SpeechSegment
 from modes.director.verify import verify_before_serve
-from modes.kiosk.wake_word import WakeWordDetector
+from modes.kiosk.wake_word import WakeWordDetector, display_name
 from modes.talkback.handoff import DirectorHandoff
 
 
@@ -189,7 +189,8 @@ class WakeGate:
         if wake_score is not None:
             self._safe_callback(
                 self.on_event, "wake_detected",
-                {"phrase": self.config["kiosk"]["wake_phrase"], "score": wake_score},
+                {"phrase": display_name(self.config["kiosk"]["wake_phrase"]),
+                 "score": wake_score},
             )
             self._state = "AWAIT_FIRST_SEGMENT"
             self._wake_time = time.monotonic()

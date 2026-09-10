@@ -50,7 +50,8 @@ class TestIdleAndAwait:
                       fake_runtime, on_event=lambda et, pl: events.append((et, pl)))
         g._handle_chunk(np.zeros(480, dtype=np.float32))
         assert events[0][0] == "wake_detected"
-        assert events[0][1] == {"phrase": "hey_jarvis", "score": 0.87}
+        # phrase is the human-readable display form (underscores/paths cleaned)
+        assert events[0][1] == {"phrase": "hey jarvis", "score": 0.87}
 
     def test_await_timeout_returns_to_idle(self, base_config, fake_mic, fake_vad,
                                            fake_embedder, fake_wake, fake_runtime, monkeypatch):

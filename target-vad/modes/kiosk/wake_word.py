@@ -7,6 +7,12 @@ import numpy as np
 from openwakeword.model import Model
 
 
+def display_name(model_name: str) -> str:
+    """Human-readable wake phrase for logs/UI: 'models/wake/hey_kusu.onnx'
+    and 'hey_mycroft' both display as the spoken phrase."""
+    return Path(model_name).stem.replace("_", " ")
+
+
 class WakeWordDetector:
     """Buffers audio chunks to openwakeword's 1280-sample frame size and
     returns the wake-phrase confidence when it crosses the threshold.

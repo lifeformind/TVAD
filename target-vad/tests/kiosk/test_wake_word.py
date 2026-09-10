@@ -22,6 +22,16 @@ def detector(fake_model):
     return det
 
 
+class TestDisplayName:
+    def test_path_model_name_displays_as_phrase(self):
+        from modes.kiosk.wake_word import display_name
+        assert display_name("models/wake/hey_kusu.onnx") == "hey kusu"
+
+    def test_plain_name_displays_as_phrase(self):
+        from modes.kiosk.wake_word import display_name
+        assert display_name("hey_mycroft") == "hey mycroft"
+
+
 class TestWakeWordDetector:
     def test_below_threshold_returns_none(self, detector, fake_model):
         fake_model.predict.return_value = {"hey_jarvis_v0.1": 0.3}
